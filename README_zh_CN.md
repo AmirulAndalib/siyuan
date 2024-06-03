@@ -1,7 +1,7 @@
 <p align="center">
 <img alt="SiYuan" src="https://b3log.org/images/brand/siyuan-128.png">
 <br>
-重构你的思维
+<em>重构你的思维</em>
 <br><br>
 <a title="Build Status" target="_blank" href="https://github.com/siyuan-note/siyuan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/siyuan-note/siyuan/cd.yml?style=flat-square"></a>
 <a title="Releases" target="_blank" href="https://github.com/siyuan-note/siyuan/releases"><img src="https://img.shields.io/github/release/siyuan-note/siyuan.svg?style=flat-square&color=9CF"></a>
@@ -19,19 +19,52 @@
 <a title="Last Commit" target="_blank" href="https://github.com/siyuan-note/siyuan/commits/master"><img src="https://img.shields.io/github/last-commit/siyuan-note/siyuan.svg?style=flat-square&color=FF9900"></a>
 <br><br>
 <a title="Twitter" target="_blank" href="https://twitter.com/b3logos"><img alt="Twitter Follow" src="https://img.shields.io/twitter/follow/b3logos?label=Follow&style=social"></a>
+<a title="Discord" target="_blank" href="https://discord.gg/dmMbCqVX7G"><img alt="Chat on Discord" src="https://img.shields.io/discord/808152298789666826?label=Discord&logo=Discord&style=social"></a>
 <br><br>
-<a href="https://www.producthunt.com/posts/siyuan?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-siyuan" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=394475&theme=light" alt="SiYuan - WYSIWYG&#0032;Block&#0032;Ref&#0032;E2EE&#0032;Sync&#0032;Local&#0045;first | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+<a href="https://www.producthunt.com/products/siyuan/reviews?utm_source=badge-product_rating&utm_medium=badge&utm_souce=badge-siyuan" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/product_rating.svg?product_id=534576&theme=light" alt="SiYuan - A&#0032;privacy&#0045;first&#0032;personal&#0032;knowledge&#0032;management&#0032;software | Product Hunt" style="width: 242px; height: 108px;" width="242" height="108" /></a>
 </p>
 
 <p align="center">
 <a href="README.md">English</a>
 </p>
 
+---
+
+## 目录
+
+* [💡 简介](#-简介)
+* [🔮 特性](#-特性)
+* [🏗️ 架构和生态](#️-架构和生态)
+* [🌟 星标历史](#-星标历史)
+* [🗺️ 路线图](#️-路线图)
+* [🚀 下载安装](#-下载安装)
+  * [应用市场](#应用市场)
+  * [安装包](#安装包)
+  * [Docker 部署](#docker-部署)
+  * [Unraid 部署](#unraid-部署)
+  * [内部预览版](#内部预览版)
+* [🏘️ 社区](#️-社区)
+* [🛠️ 开发指南](#️-开发指南)
+* [❓ 常见问题和解答](#-常见问题和解答)
+  * [思源是如何存储数据的？](#思源是如何存储数据的)
+  * [支持通过第三方同步盘进行数据同步吗？](#支持通过第三方同步盘进行数据同步吗)
+  * [思源是开源的吗？](#思源是开源的吗)
+  * [如何升级到新版本？](#如何升级到新版本)
+  * [有的块（比如在列表项中的段落块）找不到块标怎么办？](#有的块比如在列表项中的段落块找不到块标怎么办)
+  * [数据仓库密钥遗失怎么办？](#数据仓库密钥遗失怎么办)
+  * [使用需要付费吗？](#使用需要付费吗)
+* [🙏 鸣谢](#-鸣谢)
+  * [贡献者列表](#贡献者列表)
+
+---
+
 ## 💡 简介
 
 思源笔记是一款隐私优先的个人知识管理系统，支持细粒度块级引用和 Markdown 所见即所得。
 
 ![feature0.png](https://b3logfile.com/file/2024/01/feature0-1orBRlI.png)
+
+![feature51.png](https://b3logfile.com/file/2024/02/feature5-1-uYYjAqy.png)
 
 欢迎到[思源笔记官方讨论区](https://ld246.com/domain/siyuan)了解更多。同时也欢迎关注 B3log 开源社区微信公众号 `B3log开源`：
 
@@ -51,29 +84,30 @@
   * Markdown 所见即所得
   * 列表大纲
   * 块缩放聚焦
-  * 块横向排版
   * 百万字大文档编辑
   * 数学公式、图表、流程图、甘特图、时序图、五线谱等
   * 网页剪藏
   * PDF 标注双链
 * 导出
-  * 引用块和嵌入块 
+  * 块引用和嵌入块 
   * 带 assets 文件夹的标准 Markdown
   * PDF、Word 和 HTML
   * 复制到微信公众号、知乎和语雀
 * 数据库
   * 表格视图
-* 间隔重复
+* 闪卡间隔重复
+* 接入 OpenAI 接口支持人工智能写作和问答聊天
+* Tesseract OCR
 * 模板片段
 * JavaScript/CSS 代码片段
-* Android/iOS APP
+* Android/iOS App
 * Docker 部署
 * [API](API_zh_CN.md)
 * 社区集市
 
 部分功能需要付费会员才能使用，更多细节请参考[定价](https://b3log.org/siyuan/pricing.html)。
 
-## 🏗️ 架构设计和开源生态
+## 🏗️ 架构和生态
 
 ![思源笔记架构设计](https://b3logfile.com/file/2023/05/SiYuan_Arch-Sgu8vXT.png "思源笔记架构设计")
 
@@ -84,11 +118,11 @@
 | [bazaar](https://github.com/siyuan-note/bazaar)          | 社区集市           | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/bazaar)         | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/bazaar)         |
 | [dejavu](https://github.com/siyuan-note/dejavu)          | 数据仓库           | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/dejavu)         | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/dejavu)         |
 | [petal](https://github.com/siyuan-note/petal)            | 插件 API         | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/petal)          | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/petal)          |
-| [android](https://github.com/siyuan-note/siyuan-android) | Android APP    | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/siyuan-android) | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/siyuan-android) |
-| [ios](https://github.com/siyuan-note/siyuan-ios)         | iOS APP        | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/siyuan-ios)     | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/siyuan-ios)     |
+| [android](https://github.com/siyuan-note/siyuan-android) | Android App    | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/siyuan-android) | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/siyuan-android) |
+| [ios](https://github.com/siyuan-note/siyuan-ios)         | iOS App        | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/siyuan-ios)     | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/siyuan-ios)     |
 | [riff](https://github.com/siyuan-note/riff)              | 间隔重复           | ![GitHub forks](https://img.shields.io/github/forks/siyuan-note/riff)           | ![GitHub Repo stars](https://img.shields.io/github/stars/siyuan-note/riff)           |
 
-## 🌟 Star History
+## 🌟 星标历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=siyuan-note/siyuan&type=Date)](https://star-history.com/#siyuan-note/siyuan&Date)
 
@@ -103,12 +137,23 @@
 
 ### 应用市场
 
+移动端：
+
 * [App Store](https://apps.apple.com/cn/app/siyuan/id1583226508)
 * [Google Play](https://play.google.com/store/apps/details?id=org.b3log.siyuan)
-* [Microsoft Store](https://www.microsoft.com/store/apps/9P7HPMXP73K4)
+* [F-Droid](https://f-droid.org/packages/org.b3log.siyuan)
 * [华为应用市场](https://appgallery.huawei.com/app/C105558879)
 * [小米应用商店](https://app.mi.com/details?id=org.b3log.siyuan)
 * [酷安](https://www.coolapk.com/apk/292664)
+
+桌面端：
+
+* [Microsoft Store](https://apps.microsoft.com/detail/9p7hpmxp73k4)
+
+### 安装包
+
+* [B3log](https://b3log.org/siyuan/download.html)
+* [GitHub](https://github.com/siyuan-note/siyuan/releases)
 
 ### Docker 部署
 
@@ -196,10 +241,26 @@ services:
 
 </details>
 
-### 安装包
+### Unraid 部署
 
-* [B3log](https://b3log.org/siyuan/download.html)
-* [GitHub](https://github.com/siyuan-note/siyuan/releases)
+<details>
+<summary>Unraid 部署文档</summary>
+
+注意：首先终端运行 `chown -R 1000:1000 /mnt/user/appdata/siyuan`
+
+模板参考：
+
+```
+Web UI: 6806
+Container Port: 6806
+Container Path: /home/siyuan
+Host path: /mnt/user/appdata/siyuan
+PUID: 1000
+PGID: 1000
+Publish parameters: --accessAuthCode=******（访问授权码）
+```
+
+</details>
 
 ### 内部预览版
 
@@ -263,25 +324,9 @@ services:
 
 **注意**：切勿将工作空间放置于安装目录下，因为更新版本会清空安装目录下的所有文件
 
-### 删除文档有什么注意事项吗？
-
-文档被删除后不会出现在操作系统回收站中，而是直接删除，删除时思源会生成数据历史。
-
-### 如何才能只换行不新起段落？
-
-请使用 <kbd>Shift+Enter</kbd>。
-
-## 有的块（比如在列表项中的段落块）找不到块标怎么办？
+### 有的块（比如在列表项中的段落块）找不到块标怎么办？
 
 在列表项下的第一个子块是省略块标的。可以将光标移到这个块中，然后通过 <kbd>Ctrl+/</kbd> 触发它的块标菜单。
-
-### 如何分享笔记？
-
-* 分享文档到链滴
-* 导出导入 `.sy.zip` 数据包
-* 通过网络伺服
-* 导出导入 Markdown
-* <kbd>导出预览</kbd> 中复制到第三方在线服务
 
 ### 数据仓库密钥遗失怎么办？
 

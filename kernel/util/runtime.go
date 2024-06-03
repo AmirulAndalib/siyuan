@@ -38,7 +38,7 @@ import (
 	"github.com/siyuan-note/logging"
 )
 
-// UseSingleLineSave 是否使用单行保存 .sy 文件。
+// UseSingleLineSave 是否使用单行保存 .sy 和数据库 .json 文件。
 var UseSingleLineSave = true
 
 // IsUILoaded 是否已经加载了 UI。
@@ -310,6 +310,7 @@ func isICloudPath(workspaceAbsPath string) (ret bool) {
 
 		if strings.HasPrefix(workspaceAbsPathLower, strings.ToLower(path)) {
 			ret = true
+			logging.LogWarnf("workspace [%s] is in iCloud path [%s]", workspaceAbsPath, path)
 			return io.EOF
 		}
 		return nil

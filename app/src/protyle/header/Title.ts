@@ -1,20 +1,20 @@
 import {
-    focusBlock, focusByOffset,
-    focusByRange, focusByWbr,
-    getEditorRange, getSelectionOffset,
+    focusBlock,
+    focusByOffset,
+    focusByRange,
+    focusByWbr,
+    getEditorRange,
+    getSelectionOffset,
 } from "../util/selection";
 import {fetchPost} from "../../util/fetch";
 import {replaceFileName, validateName} from "../../editor/rename";
 import {MenuItem} from "../../menus/Menu";
-import {
-    openFileAttr,
-} from "../../menus/commonMenuItem";
+import {openFileAttr,} from "../../menus/commonMenuItem";
 import {Constants} from "../../constants";
 import {matchHotKey} from "../util/hotKey";
 import {isMac, readText, writeText} from "../util/compatibility";
 import * as dayjs from "dayjs";
-import {setPanelFocus} from "../../layout/util";
-import {openFileById, updatePanelByEditor} from "../../editor/util";
+import {openFileById} from "../../editor/util";
 import {setTitle} from "../../dialog/processSystem";
 import {getNoContainerElement} from "../wysiwyg/getBlock";
 import {commonHotkey} from "../wysiwyg/commonHotkey";
@@ -37,6 +37,7 @@ export class Title {
         if (window.siyuan.config.editor.displayBookmarkIcon) {
             this.element.classList.add("protyle-wysiwyg--attr");
         }
+        /// #if !MOBILE
         // 标题内需要一个空格，避免首次加载出现`请输入文档名`干扰
         this.element.innerHTML = `<span aria-label="${isMac() ? window.siyuan.languages.gutterTip2 : window.siyuan.languages.gutterTip2.replace("⇧", "Shift+")}" data-position="right" class="protyle-title__icon ariaLabel"><svg><use xlink:href="#iconFile"></use></svg></span>
 <div contenteditable="true" spellcheck="${window.siyuan.config.editor.spellcheck}" class="protyle-title__input" data-tip="${window.siyuan.languages._kernel[16]}"> </div><div class="protyle-attr"></div>`;
@@ -48,16 +49,6 @@ export class Title {
             this.rename(protyle);
         });
         this.editElement.addEventListener("click", () => {
-            if (protyle.model) {
-                setPanelFocus(protyle.model.element.parentElement.parentElement);
-                updatePanelByEditor({
-                    protyle: protyle,
-                    focus: false,
-                    pushBackStack: false,
-                    reload: false,
-                    resize: false,
-                });
-            }
             protyle.toolbar?.element.classList.add("fn__none");
         });
         this.editElement.addEventListener("input", (event: InputEvent) => {
@@ -81,6 +72,19 @@ export class Title {
 
             if (commonHotkey(protyle, event)) {
                 return true;
+            }
+            if (matchHotKey("⇧⌘V", event)) {
+                navigator.clipboard.readText().then(textPlain => {
+                    // 对 HTML 标签进行内部转义，避免被 Lute 解析以后变为小写 https://github.com/siyuan-note/siyuan/issues/10620
+                    textPlain = textPlain.replace(/</g, ";;;lt;;;").replace(/>/g, ";;;gt;;;");
+                    let content = protyle.lute.BlockDOM2EscapeMarkerContent(protyle.lute.Md2BlockDOM(textPlain));
+                    // 移除 ;;;lt;;; 和 ;;;gt;;; 转义及其包裹的内容
+                    content = content.replace(/;;;lt;;;[^;]+;;;gt;;;/g, "");
+                    document.execCommand("insertText", false, replaceFileName(content));
+                    this.rename(protyle);
+                });
+                event.preventDefault();
+                event.stopPropagation();
             }
             if (matchHotKey(window.siyuan.config.keymap.general.enterBack.custom, event)) {
                 const ids = protyle.path.split("/");
@@ -210,6 +214,7 @@ export class Title {
             }
             window.siyuan.menus.menu.append(new MenuItem({
                 label: window.siyuan.languages.paste,
+                icon: "iconPaste",
                 accelerator: "⌘V",
                 click: async () => {
                     focusByRange(getEditorRange(this.editElement));
@@ -220,7 +225,22 @@ export class Title {
                 }
             }).element);
             window.siyuan.menus.menu.append(new MenuItem({
+                label: window.siyuan.languages.pasteAsPlainText,
+                accelerator: "⇧⌘V",
+                click: async () => {
+                    navigator.clipboard.readText().then(textPlain => {
+                        textPlain = textPlain.replace(/</g, ";;;lt;;;").replace(/>/g, ";;;gt;;;");
+                        let content = protyle.lute.BlockDOM2EscapeMarkerContent(protyle.lute.Md2BlockDOM(textPlain));
+                        // 移除 ;;;lt;;; 和 ;;;gt;;; 转义及其包裹的内容
+                        content = content.replace(/;;;lt;;;[^;]+;;;gt;;;/g, "");
+                        document.execCommand("insertText", false, replaceFileName(content));
+                        this.rename(protyle);
+                    });
+                }
+            }).element);
+            window.siyuan.menus.menu.append(new MenuItem({
                 label: window.siyuan.languages.selectAll,
+                icon: "iconSelect",
                 accelerator: "⌘A",
                 click: () => {
                     range.selectNodeContents(this.editElement);
@@ -229,6 +249,9 @@ export class Title {
             }).element);
             window.siyuan.menus.menu.popup({x: event.clientX, y: event.clientY});
         });
+        /// #else
+        this.element.innerHTML = '<div class="protyle-attr"></div>';
+        /// #endif
         this.element.querySelector(".protyle-attr").addEventListener("click", (event: MouseEvent & {
             target: HTMLElement
         }) => {
@@ -263,13 +286,20 @@ export class Title {
     }
 
     public setTitle(title: string) {
-        if (code160to32(title) !== code160to32(this.editElement.textContent)) {
-            this.editElement.textContent = title === "Untitled" ? "" : title;
+        /// #if MOBILE
+        const inputElement = document.getElementById("toolbarName") as HTMLInputElement;
+        if (code160to32(title) !== code160to32(inputElement.value)) {
+            inputElement.value = title === window.siyuan.languages.untitled ? "" : title;
         }
+        /// #else
+        if (code160to32(title) !== code160to32(this.editElement.textContent)) {
+            this.editElement.textContent = title === window.siyuan.languages.untitled ? "" : title;
+        }
+        /// #endif
     }
 
     public render(protyle: IProtyle, response: IWebSocketData) {
-        if (this.editElement.getAttribute("data-render") === "true") {
+        if (this.element.getAttribute("data-render") === "true") {
             return false;
         }
         this.element.setAttribute("data-node-id", protyle.block.rootID);
@@ -278,7 +308,7 @@ export class Title {
         }
         protyle.background?.render(response.data.ial, protyle.block.rootID);
         protyle.wysiwyg.renderCustom(response.data.ial);
-        this.editElement.setAttribute("data-render", "true");
+        this.element.setAttribute("data-render", "true");
         this.setTitle(response.data.ial.title);
         let nodeAttrHTML = "";
         if (response.data.ial.bookmark) {
@@ -294,14 +324,21 @@ export class Title {
             nodeAttrHTML += `<div class="protyle-attr--memo b3-tooltips b3-tooltips__sw" aria-label="${Lute.EscapeHTMLStr(response.data.ial.memo)}"><svg><use xlink:href="#iconM"></use></svg></div>`;
         }
         if (response.data.ial["custom-avs"]) {
-            nodeAttrHTML += '<div class="protyle-attr--av"><svg><use xlink:href="#iconDatabase"></use></svg></div>';
+            let avTitle = "";
+            response.data.attrViews.forEach((item: { id: string, name: string }) => {
+                avTitle += `<span data-av-id="${item.id}" data-popover-url="/api/av/getMirrorDatabaseBlocks" class="popover__block">${item.name}</span>&nbsp;`;
+            });
+            if (avTitle) {
+                avTitle = avTitle.substring(0, avTitle.length - 6);
+            }
+            nodeAttrHTML += `<div class="protyle-attr--av"><svg><use xlink:href="#iconDatabase"></use></svg>${avTitle}</div>`;
         }
         this.element.querySelector(".protyle-attr").innerHTML = nodeAttrHTML;
         if (response.data.refCount !== 0) {
             this.element.querySelector(".protyle-attr").insertAdjacentHTML("beforeend", `<div class="protyle-attr--refcount popover__block" data-defids='${JSON.stringify([protyle.block.rootID])}' data-id='${JSON.stringify(response.data.refIDs)}'>${response.data.refCount}</div>`);
         }
         // 存在设置新建文档名模板，不能使用 Untitled 进行判断，https://ld246.com/article/1649301009888
-        if (new Date().getTime() - dayjs(response.data.id.split("-")[0]).toDate().getTime() < 2000) {
+        if (this.editElement && new Date().getTime() - dayjs(response.data.id.split("-")[0]).toDate().getTime() < 2000) {
             const range = this.editElement.ownerDocument.createRange();
             range.selectNodeContents(this.editElement);
             focusByRange(range);

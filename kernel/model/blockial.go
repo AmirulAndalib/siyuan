@@ -53,7 +53,7 @@ func SetBlockReminder(id string, timed string) (err error) {
 	}
 
 	attrs := GetBlockAttrs(id) // 获取属性是会等待树写入
-	tree, err := loadTreeByBlockID(id)
+	tree, err := LoadTreeByBlockID(id)
 	if nil != err {
 		return
 	}
@@ -66,7 +66,7 @@ func SetBlockReminder(id string, timed string) (err error) {
 	if ast.NodeDocument != node.Type && node.IsContainerBlock() {
 		node = treenode.FirstLeafBlock(node)
 	}
-	content := treenode.NodeStaticContent(node, nil, false, false, false)
+	content := sql.NodeStaticContent(node, nil, false, false, false, GetBlockAttrsWithoutWaitWriting)
 	content = gulu.Str.SubStr(content, 128)
 	err = SetCloudBlockReminder(id, content, timedMills)
 	if nil != err {
@@ -87,11 +87,69 @@ func SetBlockReminder(id string, timed string) (err error) {
 		node.SetIALAttr(attrName, timed)
 		util.PushMsg(fmt.Sprintf(Conf.Language(101), time.UnixMilli(timedMills).Format("2006-01-02 15:04")), 5000)
 	}
-	if err = indexWriteJSONQueue(tree); nil != err {
+	if err = indexWriteTreeUpsertQueue(tree); nil != err {
 		return
 	}
 	IncSync()
 	cache.PutBlockIAL(id, attrs)
+	return
+}
+
+func BatchSetBlockAttrs(blockAttrs []map[string]interface{}) (err error) {
+	if util.ReadOnly {
+		return
+	}
+
+	WaitForWritingFiles()
+	trees := map[string]*parse.Tree{}
+	for _, blockAttr := range blockAttrs {
+		id := blockAttr["id"].(string)
+		bt := treenode.GetBlockTree(id)
+		if nil == bt {
+			return errors.New(fmt.Sprintf(Conf.Language(15), id))
+		}
+
+		if nil == trees[bt.RootID] {
+			tree, e := LoadTreeByBlockID(id)
+			if nil != e {
+				return e
+			}
+			trees[bt.RootID] = tree
+		}
+	}
+
+	var nodes []*ast.Node
+	for _, blockAttr := range blockAttrs {
+		id := blockAttr["id"].(string)
+		bt := treenode.GetBlockTree(id)
+		if nil == bt {
+			return errors.New(fmt.Sprintf(Conf.Language(15), id))
+		}
+		tree := trees[bt.RootID]
+		node := treenode.GetNodeInTree(tree, id)
+		if nil == node {
+			return errors.New(fmt.Sprintf(Conf.Language(15), id))
+		}
+
+		attrs := blockAttr["attrs"].(map[string]string)
+		oldAttrs, e := setNodeAttrs0(node, attrs)
+		if nil != e {
+			return e
+		}
+
+		cache.PutBlockIAL(node.ID, parse.IAL2Map(node.KramdownIAL))
+		pushBroadcastAttrTransactions(oldAttrs, node)
+		nodes = append(nodes, node)
+	}
+
+	for _, tree := range trees {
+		if err = indexWriteTreeUpsertQueue(tree); nil != err {
+			return
+		}
+	}
+
+	IncSync()
+	// 不做锚文本刷新
 	return
 }
 
@@ -102,7 +160,7 @@ func SetBlockAttrs(id string, nameValues map[string]string) (err error) {
 
 	WaitForWritingFiles()
 
-	tree, err := loadTreeByBlockID(id)
+	tree, err := LoadTreeByBlockID(id)
 	if nil != err {
 		return err
 	}
@@ -122,7 +180,7 @@ func setNodeAttrs(node *ast.Node, tree *parse.Tree, nameValues map[string]string
 		return
 	}
 
-	if err = indexWriteJSONQueue(tree); nil != err {
+	if err = indexWriteTreeUpsertQueue(tree); nil != err {
 		return
 	}
 
@@ -169,12 +227,6 @@ func setNodeAttrs0(node *ast.Node, nameValues map[string]string) (oldAttrs map[s
 	}
 
 	for name, value := range nameValues {
-		if strings.HasPrefix(name, "custom-av") {
-			// 属性视图设置的属性值可以为空
-			node.SetIALAttr(name, value)
-			continue
-		}
-
 		if "" == strings.TrimSpace(value) {
 			node.RemoveIALAttr(name)
 		} else {
@@ -196,7 +248,7 @@ func pushBroadcastAttrTransactions(oldAttrs map[string]string, node *ast.Node) {
 }
 
 func ResetBlockAttrs(id string, nameValues map[string]string) (err error) {
-	tree, err := loadTreeByBlockID(id)
+	tree, err := LoadTreeByBlockID(id)
 	if nil != err {
 		return err
 	}
@@ -227,7 +279,7 @@ func ResetBlockAttrs(id string, nameValues map[string]string) (err error) {
 		updateRefTextRenameDoc(tree)
 	}
 
-	if err = indexWriteJSONQueue(tree); nil != err {
+	if err = indexWriteTreeUpsertQueue(tree); nil != err {
 		return
 	}
 	IncSync()
@@ -244,7 +296,7 @@ func GetBlockAttrs(id string) (ret map[string]string) {
 
 	WaitForWritingFiles()
 
-	tree, err := loadTreeByBlockID(id)
+	tree, err := LoadTreeByBlockID(id)
 	if nil != err {
 		return
 	}
@@ -269,7 +321,7 @@ func GetBlockAttrsWithoutWaitWriting(id string) (ret map[string]string) {
 		return
 	}
 
-	tree, err := loadTreeByBlockID(id)
+	tree, err := LoadTreeByBlockID(id)
 	if nil != err {
 		return
 	}

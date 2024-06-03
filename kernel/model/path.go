@@ -33,13 +33,16 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func createDocsByHPath(boxID, hPath, content, parentID, id string /* id 参数仅在 parentID 不为空的情况下使用 */) (retID string, err error) {
+func createDocsByHPath(boxID, hPath, content, parentID, id string) (retID string, err error) {
+	if "" == id {
+		id = ast.NewNodeID()
+	}
+	retID = id
+
 	hPath = strings.TrimSuffix(hPath, ".sy")
 	if "" != parentID {
-		retID = id
-
 		// The save path is incorrect when creating a sub-doc by ref in a doc with the same name https://github.com/siyuan-note/siyuan/issues/8138
-		// 在指定父文档 ID 的情况下优先查找父文档
+		// 在指定了父文档 ID 的情况下优先查找父文档
 		parentHPath, name := path.Split(hPath)
 		parentHPath = strings.TrimSuffix(parentHPath, "/")
 		preferredParent := treenode.GetBlockTreeRootByHPathPreferredParentID(boxID, parentHPath, parentID)
@@ -50,11 +53,6 @@ func createDocsByHPath(boxID, hPath, content, parentID, id string /* id 参数�
 				logging.LogErrorf("create doc [%s] failed: %s", p, err)
 			}
 			return
-		}
-	} else {
-		retID = ast.NewNodeID()
-		if "" == id {
-			id = retID
 		}
 	}
 
@@ -207,7 +205,7 @@ func toSubTree(blocks []*Block, keyword string) (ret []*Path) {
 		}
 		for _, c := range root.Children {
 			if "NodeListItem" == c.Type {
-				tree, _ := loadTreeByBlockID(c.RootID)
+				tree, _ := LoadTreeByBlockID(c.RootID)
 				li := treenode.GetNodeInTree(tree, c.ID)
 				if nil == li || nil == li.FirstChild {
 					// 反链面板拖拽到文档以后可能会出现这种情况 https://github.com/siyuan-note/siyuan/issues/5363
@@ -309,7 +307,7 @@ func toSubTree(blocks []*Block, keyword string) (ret []*Path) {
 					treeNode.Children = append(treeNode.Children, subRoot)
 				}
 			} else if "NodeHeading" == c.Type {
-				tree, _ := loadTreeByBlockID(c.RootID)
+				tree, _ := LoadTreeByBlockID(c.RootID)
 				h := treenode.GetNodeInTree(tree, c.ID)
 				if nil == h {
 					continue

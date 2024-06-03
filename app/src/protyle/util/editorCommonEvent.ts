@@ -27,6 +27,8 @@ import {isBrowser} from "../../util/functions";
 import {hideElements} from "../ui/hideElements";
 import {insertAttrViewBlockAnimation} from "../render/av/row";
 import {dragUpload} from "../render/av/asset";
+import * as dayjs from "dayjs";
+import {zoomOut} from "../../menus/protyle";
 
 const moveToNew = (protyle: IProtyle, sourceElements: Element[], targetElement: Element, newSourceElement: Element,
                    isSameDoc: boolean, isBottom: boolean, isCopy: boolean) => {
@@ -519,18 +521,22 @@ const dragSb = async (protyle: IProtyle, sourceElements: Element[], targetElemen
         const protyleElement = hasClosestByClassName(oldSourceParentElement, "protyle", true);
         if (protyleElement && !protyleElement.classList.contains("block__edit")) {
             const editor = getInstanceById(protyleElement.getAttribute("data-id")) as Tab;
-            if (editor && editor.model instanceof Editor && editor.model.editor.protyle.block.id === editor.model.editor.protyle.block.rootID) {
-                const newId = Lute.NewNodeID();
-                doOperations.splice(0, 0, {
-                    action: "insert",
-                    id: newId,
-                    data: genEmptyElement(false, false, newId).outerHTML,
-                    parentID: editor.model.editor.protyle.block.parentID
-                });
-                undoOperations.splice(0, 0, {
-                    action: "delete",
-                    id: newId,
-                });
+            if (editor && editor.model instanceof Editor) {
+                if (editor.model.editor.protyle.block.id === editor.model.editor.protyle.block.rootID) {
+                    const newId = Lute.NewNodeID();
+                    doOperations.splice(0, 0, {
+                        action: "insert",
+                        id: newId,
+                        data: genEmptyElement(false, false, newId).outerHTML,
+                        parentID: editor.model.editor.protyle.block.parentID
+                    });
+                    undoOperations.splice(0, 0, {
+                        action: "delete",
+                        id: newId,
+                    });
+                } else {
+                    zoomOut({protyle: editor.model.editor.protyle, id: editor.model.editor.protyle.block.rootID});
+                }
             }
         }
         /// #endif
@@ -679,18 +685,23 @@ const dragSame = async (protyle: IProtyle, sourceElements: Element[], targetElem
         const protyleElement = hasClosestByClassName(oldSourceParentElement, "protyle", true);
         if (protyleElement && !protyleElement.classList.contains("block__edit")) {
             const editor = getInstanceById(protyleElement.getAttribute("data-id")) as Tab;
-            if (editor && editor.model instanceof Editor && editor.model.editor.protyle.block.id === editor.model.editor.protyle.block.rootID) {
-                const newId = Lute.NewNodeID();
-                doOperations.splice(0, 0, {
-                    action: "insert",
-                    id: newId,
-                    data: genEmptyElement(false, false, newId).outerHTML,
-                    parentID: editor.model.editor.protyle.block.parentID
-                });
-                undoOperations.splice(0, 0, {
-                    action: "delete",
-                    id: newId,
-                });
+            if (editor && editor.model instanceof Editor) {
+                if (editor.model.editor.protyle.block.id === editor.model.editor.protyle.block.rootID) {
+                    const newId = Lute.NewNodeID();
+                    doOperations.splice(0, 0, {
+                        action: "insert",
+                        id: newId,
+                        data: genEmptyElement(false, false, newId).outerHTML,
+                        parentID: editor.model.editor.protyle.block.parentID
+                    });
+                    undoOperations.splice(0, 0, {
+                        action: "delete",
+                        id: newId,
+                    });
+                } else {
+                    zoomOut({protyle: editor.model.editor.protyle, id: editor.model.editor.protyle.block.rootID});
+                }
+
             }
         }
         /// #endif
@@ -798,6 +809,7 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                 }
 
                 const sourceIds: string [] = [];
+                const srcs: IOperationSrcs[] = [];
                 sourceElements.forEach(item => {
                     item.classList.remove("protyle-wysiwyg--select", "protyle-wysiwyg--hl");
                     item.removeAttribute("select-start");
@@ -806,7 +818,12 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                     item.querySelectorAll('[data-type="search-mark"]').forEach(markItem => {
                         markItem.outerHTML = markItem.innerHTML;
                     });
-                    sourceIds.push(item.getAttribute("data-node-id"));
+                    const id = item.getAttribute("data-node-id");
+                    sourceIds.push(id);
+                    srcs.push({
+                        id,
+                        isDetached: false,
+                    });
                 });
 
                 hideElements(["gutter"], protyle);
@@ -842,17 +859,21 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                                 }
                             }
                         }
-                        transaction(protyle, [{
-                            action: "sortAttrViewCol",
-                            avID,
-                            previousID,
-                            id: gutterTypes[2],
-                        }], [{
-                            action: "sortAttrViewCol",
-                            avID,
-                            previousID: oldPreviousID,
-                            id: gutterTypes[2],
-                        }]);
+                        if (previousID !== oldPreviousID && previousID !== gutterTypes[2]) {
+                            transaction(protyle, [{
+                                action: "sortAttrViewCol",
+                                avID,
+                                previousID,
+                                id: gutterTypes[2],
+                                blockID: blockElement.dataset.nodeId,
+                            }], [{
+                                action: "sortAttrViewCol",
+                                avID,
+                                previousID: oldPreviousID,
+                                id: gutterTypes[2],
+                                blockID: blockElement.dataset.nodeId,
+                            }]);
+                        }
                     }
                 } else if (targetElement.classList.contains("av__row")) {
                     // 拖拽到属性视图内
@@ -869,34 +890,48 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                             // 行内拖拽
                             const doOperations: IOperation[] = [];
                             const undoOperations: IOperation[] = [];
-                            const undoPreviousId = blockElement.querySelector(`[data-id="${selectedIds[0]}"]`).previousElementSibling.getAttribute("data-id") || "";
+                            const undoPreviousId = blockElement.querySelector(`.av__row[data-id="${selectedIds[0]}"]`).previousElementSibling.getAttribute("data-id") || "";
                             selectedIds.reverse().forEach(item => {
-                                doOperations.push({
-                                    action: "sortAttrViewRow",
-                                    avID,
-                                    previousID,
-                                    id: item,
-                                });
-                                undoOperations.push({
-                                    action: "sortAttrViewRow",
-                                    avID,
-                                    previousID: undoPreviousId,
-                                    id: item,
-                                });
+                                if (previousID !== item && undoPreviousId !== previousID) {
+                                    doOperations.push({
+                                        action: "sortAttrViewRow",
+                                        avID,
+                                        previousID,
+                                        id: item,
+                                        blockID: blockElement.dataset.nodeId,
+                                    });
+                                    undoOperations.push({
+                                        action: "sortAttrViewRow",
+                                        avID,
+                                        previousID: undoPreviousId,
+                                        id: item,
+                                        blockID: blockElement.dataset.nodeId,
+                                    });
+                                }
                             });
                             transaction(protyle, doOperations, undoOperations);
                         } else {
+                            const newUpdated = dayjs().format("YYYYMMDDHHmmss");
                             transaction(protyle, [{
                                 action: "insertAttrViewBlock",
                                 avID,
                                 previousID,
-                                srcIDs: sourceIds,
-                                isDetached: false,
+                                srcs,
+                                blockID: blockElement.dataset.nodeId
+                            }, {
+                                action: "doUpdateUpdated",
+                                id: blockElement.dataset.nodeId,
+                                data: newUpdated,
                             }], [{
                                 action: "removeAttrViewBlock",
                                 srcIDs: sourceIds,
                                 avID,
+                            }, {
+                                action: "doUpdateUpdated",
+                                id: blockElement.dataset.nodeId,
+                                data: blockElement.getAttribute("updated")
                             }]);
+                            blockElement.setAttribute("updated", newUpdated);
                             insertAttrViewBlockAnimation(protyle, blockElement, sourceIds, previousID);
                         }
                     }
@@ -946,18 +981,35 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                         previousID = targetElement.previousElementSibling?.getAttribute("data-id") || "";
                     }
                     const avID = blockElement.getAttribute("data-av-id");
+                    const newUpdated = dayjs().format("YYYYMMDDHHmmss");
+                    const srcs: IOperationSrcs[] = [];
+                    ids.forEach(id => {
+                        srcs.push({
+                            id,
+                            isDetached: false,
+                        });
+                    });
                     transaction(protyle, [{
                         action: "insertAttrViewBlock",
                         avID,
                         previousID,
-                        srcIDs: ids,
-                        isDetached: false,
+                        srcs,
+                        blockID: blockElement.dataset.nodeId,
+                    }, {
+                        action: "doUpdateUpdated",
+                        id: blockElement.dataset.nodeId,
+                        data: newUpdated,
                     }], [{
                         action: "removeAttrViewBlock",
                         srcIDs: ids,
                         avID,
+                    }, {
+                        action: "doUpdateUpdated",
+                        id: blockElement.dataset.nodeId,
+                        data: blockElement.getAttribute("updated")
                     }]);
                     insertAttrViewBlockAnimation(protyle, blockElement, ids, previousID);
+                    blockElement.setAttribute("updated", newUpdated);
                 }
             } else {
                 for (let i = 0; i < ids.length; i++) {
@@ -1016,7 +1068,7 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                         for (let i = 0; i < event.dataTransfer.files.length; i++) {
                             files.push(event.dataTransfer.files[i].path);
                         }
-                        dragUpload(files, protyle, cellElement, avElement.dataset.avId);
+                        dragUpload(files, protyle, cellElement);
                     }
                 }
             }
@@ -1029,13 +1081,14 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
     let dragoverElement: Element;
     let disabledPosition: string;
     editorElement.addEventListener("dragover", (event: DragEvent & { target: HTMLElement }) => {
-        if (protyle.disabled) {
+        if (protyle.disabled || event.dataTransfer.types.includes(Constants.SIYUAN_DROP_EDITOR)) {
             event.preventDefault();
             event.stopPropagation();
+            event.dataTransfer.dropEffect = "none";
             return;
         }
         const contentRect = protyle.contentElement.getBoundingClientRect();
-        if (event.clientY < contentRect.top + Constants.SIZE_SCROLL_TB || event.clientY > contentRect.bottom - Constants.SIZE_SCROLL_TB) {
+        if (!hasClosestByClassName(event.target, "av__cell") && (event.clientY < contentRect.top + Constants.SIZE_SCROLL_TB || event.clientY > contentRect.bottom - Constants.SIZE_SCROLL_TB)) {
             protyle.contentElement.scroll({
                 top: protyle.contentElement.scrollTop + (event.clientY < contentRect.top + Constants.SIZE_SCROLL_TB ? -Constants.SIZE_SCROLL_STEP : Constants.SIZE_SCROLL_STEP),
                 behavior: "smooth"
@@ -1115,7 +1168,7 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             if (targetElement) {
                 const targetRowElement = hasClosestByClassName(targetElement, "av__row--header");
                 const dragRowElement = hasClosestByClassName(window.siyuan.dragElement, "av__row--header");
-                if (!targetRowElement || !dragRowElement ||
+                if (targetElement.isSameNode(window.siyuan.dragElement) || !targetRowElement || !dragRowElement ||
                     (targetRowElement && dragRowElement && !targetRowElement.isSameNode(dragRowElement))
                 ) {
                     targetElement = false;
@@ -1157,11 +1210,15 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
 
             if (targetElement.classList.contains("av__cell")) {
                 if (event.clientX < nodeRect.left + nodeRect.width / 2 && event.clientX > nodeRect.left &&
-                    !targetElement.classList.contains("av__row")) {
+                    !targetElement.classList.contains("av__row") && !targetElement.previousElementSibling.isSameNode(window.siyuan.dragElement)) {
                     targetElement.classList.add("dragover__left");
                 } else if (event.clientX > nodeRect.right - nodeRect.width / 2 && event.clientX <= nodeRect.right + 1 &&
-                    !targetElement.classList.contains("av__row")) {
-                    targetElement.classList.add("dragover__right");
+                    !targetElement.classList.contains("av__row") && !targetElement.isSameNode(window.siyuan.dragElement.previousElementSibling)) {
+                    if (window.siyuan.dragElement.previousElementSibling.classList.contains("av__colsticky") && targetElement.isSameNode(window.siyuan.dragElement.previousElementSibling.lastElementChild)) {
+                        // 拖拽到固定列的最后一个元素
+                    } else {
+                        targetElement.classList.add("dragover__right");
+                    }
                 }
                 return;
             }
@@ -1195,6 +1252,10 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             const gutterTypes = gutterType.replace(Constants.SIYUAN_DROP_GUTTER, "").split(Constants.ZWSP);
             if (gutterTypes[0] === "nodeattributeview" && gutterTypes[1] === "col" && targetElement.getAttribute("data-id") === gutterTypes[2]) {
                 // 表头不能拖到自己上
+                return;
+            }
+            if (gutterTypes[0] === "nodeattributeviewrowmenu" && gutterTypes[2] === targetElement.getAttribute("data-id")) {
+                // 行不能拖到自己上
                 return;
             }
             const isSelf = gutterTypes[2].split(",").find((item: string) => {

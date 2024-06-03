@@ -20,8 +20,11 @@ export const initConfigSearch = (element: HTMLElement, app: App) => {
             "historyRetentionDays", "historyRetentionDaysTip", "clearHistory", "katexMacros", "katexMacrosTip",
             "editReadonly", "editReadonlyTip", "embedBlockBreadcrumb", "embedBlockBreadcrumbTip", "outlineOutdentTip",
             "outdent", "floatWindowMode", "floatWindowModeTip", "justify", "justifyTip", "rtl", "rtlTip", "spellcheck",
-            "spellcheckTip", "backlinkExpand", "backlinkExpandTip", "onlySearchForDoc", "onlySearchForDocTip",
-            "dynamicLoadBlocks", "dynamicLoadBlocksTip", "fontSizeScrollZoom", "fontSizeScrollZoomTip"
+            "spellcheckTip", "backlinkExpand", "backlinkExpandTip", "backmentionExpand", "backmentionExpandTip",
+            "onlySearchForDoc", "onlySearchForDocTip", "dynamicLoadBlocks", "dynamicLoadBlocksTip", "fontSizeScrollZoom", "fontSizeScrollZoomTip",
+            "listItemDotNumberClickFocus", "listItemDotNumberClickFocusTip", "editorMarkdownInlineSup", "editorMarkdownInlineSupTip",
+            "editorMarkdownInlineSub", "editorMarkdownInlineSubTip", "editorMarkdownInlineTag", "editorMarkdownInlineTagTip",
+            "editorMarkdownInlineMath", "editorMarkdownInlineMathTip", "allowHTMLBLockScript", "allowHTMLBLockScriptTip",
         ]),
 
         // 文档树
@@ -35,11 +38,12 @@ export const initConfigSearch = (element: HTMLElement, app: App) => {
             "flashcardSuperBlock", "flashcardHeading", "flashcardDeck", "flashcardDeckTip",
             "flashcardFSRSParamRequestRetention", "flashcardFSRSParamRequestRetentionTip",
             "flashcardFSRSParamMaximumInterval", "flashcardFSRSParamMaximumIntervalTip", "flashcardFSRSParamWeights",
-            "flashcardFSRSParamWeightsTip"]),
+            "flashcardFSRSParamWeightsTip", "reviewMode", "reviewModeTip"]),
 
         // AI
         ["AI"].concat(getLang(["ai", "apiTimeout", "apiTimeoutTip", "apiMaxTokens", "apiMaxTokensTip", "apiKey",
-            "apiKeyTip", "apiProxy", "apiProxyTip", "apiBaseURL", "apiBaseURLTip"])),
+            "apiKeyTip", "apiProxy", "apiProxyTip", "apiBaseURL", "apiBaseURLTip", "apiUserAgentTip", "apiVersion", "apiVersionTip",
+            "apiProvider", "apiProviderTip", "apiTemperature", "apiTemperatureTip", "apiMaxContexts", "apiMaxContextsTip"])),
 
         // 图片
         getLang(["assets", "unreferencedAssets", "missingAssets"]),

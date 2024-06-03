@@ -1,3 +1,5 @@
+import IUILayoutTabSearchConfigTypes = Config.IUILayoutTabSearchConfigTypes;
+
 interface ILuteNode {
     TokensStr: () => string;
     __internal_object__: {
@@ -172,6 +174,8 @@ declare class Lute {
 
     public SetTextMark(enable: boolean): void;
 
+    public SetHTMLTag2TextMark(enable: boolean): void;
+
     public SetHeadingID(enable: boolean): void;
 
     public SetProtyleMarkNetImg(enable: boolean): void;
@@ -199,6 +203,10 @@ declare class Lute {
     public SetSuperBlock(enable: boolean): void;
 
     public SetTag(enable: boolean): void;
+
+    public SetInlineMath(enable: boolean): void;
+
+    public SetGFMStrikethrough1(enable: boolean): void;
 
     public SetMark(enable: boolean): void;
 
@@ -238,7 +246,7 @@ declare class Lute {
 
     public MarkdownStr(name: string, md: string): string;
 
-    public IsValidLinkDest(text: string): boolean;
+    public GetLinkDest(text: string): string;
 
     public BlockDOM2InlineBlockDOM(html: string): string;
 
@@ -439,6 +447,11 @@ interface IProtyle {
     app: import("../index").App,
     transactionTime: number,
     id: string,
+    query?: {
+        key: string,
+        method: number
+        types: IUILayoutTabSearchConfigTypes
+    },
     block: {
         id?: string,
         scroll?: boolean

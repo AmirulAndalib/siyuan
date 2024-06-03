@@ -23,10 +23,121 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/siyuan-note/siyuan/kernel/av"
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func addAttributeViewValues(c *gin.Context) {
+func duplicateAttributeViewBlock(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+	avID := arg["avID"].(string)
+
+	newAvID, newBlockID, err := model.DuplicateDatabaseBlock(avID)
+	if nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	ret.Data = map[string]interface{}{
+		"avID":    newAvID,
+		"blockID": newBlockID,
+	}
+}
+
+func getAttributeViewKeysByAvID(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+	avID := arg["avID"].(string)
+	ret.Data = model.GetAttributeViewKeysByAvID(avID)
+}
+
+func getMirrorDatabaseBlocks(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	avID := arg["avID"].(string)
+	ret.Data = treenode.GetMirrorAttrViewBlockIDs(avID)
+}
+
+func setDatabaseBlockView(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	blockID := arg["id"].(string)
+	viewID := arg["viewID"].(string)
+
+	err := model.SetDatabaseBlockView(blockID, viewID)
+	if nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func getAttributeViewPrimaryKeyValues(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	id := arg["id"].(string)
+	page := 1
+	pageArg := arg["page"]
+	if nil != pageArg {
+		page = int(pageArg.(float64))
+	}
+
+	pageSize := -1
+	pageSizeArg := arg["pageSize"]
+	if nil != pageSizeArg {
+		pageSize = int(pageSizeArg.(float64))
+	}
+
+	keyword := ""
+	if keywordArg := arg["keyword"]; nil != keywordArg {
+		keyword = keywordArg.(string)
+	}
+	attributeViewName, databaseBlockIDs, rows, err := model.GetAttributeViewPrimaryKeyValues(id, keyword, page, pageSize)
+	if nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	ret.Data = map[string]interface{}{
+		"name":     attributeViewName,
+		"blockIDs": databaseBlockIDs,
+		"rows":     rows,
+	}
+}
+
+func appendAttributeViewDetachedBlocksWithValues(c *gin.Context) {
+	// Add an internal kernel API `/api/av/appendAttributeViewDetachedBlocksWithValues` https://github.com/siyuan-note/siyuan/issues/11608
+
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -36,27 +147,75 @@ func addAttributeViewValues(c *gin.Context) {
 	}
 
 	avID := arg["avID"].(string)
-	var srcIDs []string
-	for _, v := range arg["srcIDs"].([]interface{}) {
-		srcIDs = append(srcIDs, v.(string))
+	var values [][]*av.Value
+	for _, blocksVals := range arg["blocksValues"].([]interface{}) {
+		vals := blocksVals.([]interface{})
+		var rowValues []*av.Value
+		for _, val := range vals {
+			data, marshalErr := gulu.JSON.MarshalJSON(val)
+			if nil != marshalErr {
+				ret.Code = -1
+				ret.Msg = marshalErr.Error()
+				return
+			}
+			value := av.Value{}
+			if unmarshalErr := gulu.JSON.UnmarshalJSON(data, &value); nil != unmarshalErr {
+				ret.Code = -1
+				ret.Msg = unmarshalErr.Error()
+				return
+			}
+			rowValues = append(rowValues, &value)
+		}
+		values = append(values, rowValues)
+	}
+
+	err := model.AppendAttributeViewDetachedBlocksWithValues(avID, values)
+	if nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func addAttributeViewBlocks(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, _ := util.JsonArg(c, ret)
+	if nil == arg {
+		return
+	}
+
+	avID := arg["avID"].(string)
+	blockID := ""
+	if blockIDArg := arg["blockID"]; nil != blockIDArg {
+		blockID = blockIDArg.(string)
 	}
 	var previousID string
 	if nil != arg["previousID"] {
 		previousID = arg["previousID"].(string)
 	}
-	isDetached := arg["isDetached"].(bool)
+	ignoreFillFilter := true
+	if nil != arg["ignoreFillFilter"] {
+		ignoreFillFilter = arg["ignoreFillFilter"].(bool)
+	}
 
-	err := model.AddAttributeViewBlock(nil, srcIDs, avID, previousID, isDetached)
+	var srcs []map[string]interface{}
+	for _, v := range arg["srcs"].([]interface{}) {
+		src := v.(map[string]interface{})
+		srcs = append(srcs, src)
+	}
+	err := model.AddAttributeViewBlock(nil, srcs, avID, blockID, previousID, ignoreFillFilter)
 	if nil != err {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
 
-	pushRefreshAttrView(avID)
+	util.PushReloadAttrView(avID)
 }
 
-func removeAttributeViewValues(c *gin.Context) {
+func removeAttributeViewBlocks(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -78,10 +237,10 @@ func removeAttributeViewValues(c *gin.Context) {
 		return
 	}
 
-	pushRefreshAttrView(avID)
+	util.PushReloadAttrView(avID)
 }
 
-func addAttributeViewCol(c *gin.Context) {
+func addAttributeViewKey(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -104,10 +263,10 @@ func addAttributeViewCol(c *gin.Context) {
 		return
 	}
 
-	pushRefreshAttrView(avID)
+	util.PushReloadAttrView(avID)
 }
 
-func removeAttributeViewCol(c *gin.Context) {
+func removeAttributeViewKey(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -126,10 +285,37 @@ func removeAttributeViewCol(c *gin.Context) {
 		return
 	}
 
-	pushRefreshAttrView(avID)
+	util.PushReloadAttrView(avID)
 }
 
-func sortAttributeViewCol(c *gin.Context) {
+func sortAttributeViewViewKey(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	avID := arg["avID"].(string)
+	viewID := ""
+	if viewIDArg := arg["viewID"]; nil != viewIDArg {
+		viewID = viewIDArg.(string)
+	}
+	keyID := arg["keyID"].(string)
+	previousKeyID := arg["previousKeyID"].(string)
+
+	err := model.SortAttributeViewViewKey(avID, viewID, keyID, previousKeyID)
+	if nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	util.PushReloadAttrView(avID)
+}
+
+func sortAttributeViewKey(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -149,7 +335,7 @@ func sortAttributeViewCol(c *gin.Context) {
 		return
 	}
 
-	pushRefreshAttrView(avID)
+	util.PushReloadAttrView(avID)
 }
 
 func getAttributeViewFilterSort(c *gin.Context) {
@@ -162,8 +348,9 @@ func getAttributeViewFilterSort(c *gin.Context) {
 	}
 
 	avID := arg["id"].(string)
+	blockID := arg["blockID"].(string)
 
-	filters, sorts := model.GetAttributeViewFilterSort(avID)
+	filters, sorts := model.GetAttributeViewFilterSort(avID, blockID)
 	ret.Data = map[string]interface{}{
 		"filters": filters,
 		"sorts":   sorts,
@@ -231,22 +418,15 @@ func searchAttributeView(c *gin.Context) {
 	}
 
 	keyword := arg["keyword"].(string)
-	page := 1
-	pageArg := arg["page"]
-	if nil != pageArg {
-		page = int(pageArg.(float64))
+	var excludes []string
+	if nil != arg["excludes"] {
+		for _, e := range arg["excludes"].([]interface{}) {
+			excludes = append(excludes, e.(string))
+		}
 	}
-
-	pageSize := 10
-	pageSizeArg := arg["pageSize"]
-	if nil != pageSizeArg {
-		pageSize = int(pageSizeArg.(float64))
-	}
-
-	results, total := model.SearchAttributeView(keyword, page, pageSize)
+	results := model.SearchAttributeView(keyword, excludes)
 	ret.Data = map[string]interface{}{
 		"results": results,
-		"total":   total,
 	}
 }
 
@@ -271,10 +451,11 @@ func renderSnapshotAttributeView(c *gin.Context) {
 	var views []map[string]interface{}
 	for _, v := range attrView.Views {
 		view := map[string]interface{}{
-			"id":   v.ID,
-			"icon": v.Icon,
-			"name": v.Name,
-			"type": v.LayoutType,
+			"id":               v.ID,
+			"icon":             v.Icon,
+			"name":             v.Name,
+			"hideAttrViewName": v.HideAttrViewName,
+			"type":             v.LayoutType,
 		}
 
 		views = append(views, view)
@@ -312,10 +493,11 @@ func renderHistoryAttributeView(c *gin.Context) {
 	var views []map[string]interface{}
 	for _, v := range attrView.Views {
 		view := map[string]interface{}{
-			"id":   v.ID,
-			"icon": v.Icon,
-			"name": v.Name,
-			"type": v.LayoutType,
+			"id":               v.ID,
+			"icon":             v.Icon,
+			"name":             v.Name,
+			"hideAttrViewName": v.HideAttrViewName,
+			"type":             v.LayoutType,
 		}
 
 		views = append(views, view)
@@ -359,7 +541,13 @@ func renderAttributeView(c *gin.Context) {
 		pageSize = int(pageSizeArg.(float64))
 	}
 
-	view, attrView, err := model.RenderAttributeView(id, viewID, page, pageSize)
+	query := ""
+	queryArg := arg["query"]
+	if nil != queryArg {
+		query = queryArg.(string)
+	}
+
+	view, attrView, err := model.RenderAttributeView(id, viewID, query, page, pageSize)
 	if nil != err {
 		ret.Code = -1
 		ret.Msg = err.Error()
@@ -369,10 +557,11 @@ func renderAttributeView(c *gin.Context) {
 	var views []map[string]interface{}
 	for _, v := range attrView.Views {
 		view := map[string]interface{}{
-			"id":   v.ID,
-			"icon": v.Icon,
-			"name": v.Name,
-			"type": v.LayoutType,
+			"id":               v.ID,
+			"icon":             v.Icon,
+			"name":             v.Name,
+			"hideAttrViewName": v.HideAttrViewName,
+			"type":             v.LayoutType,
 		}
 
 		views = append(views, view)
@@ -420,9 +609,5 @@ func setAttributeViewBlockAttr(c *gin.Context) {
 	blockAttributeViewKeys := model.UpdateAttributeViewCell(nil, avID, keyID, rowID, cellID, value)
 	ret.Data = blockAttributeViewKeys
 
-	pushRefreshAttrView(avID)
-}
-
-func pushRefreshAttrView(avID string) {
-	util.BroadcastByType("protyle", "refreshAttributeView", 0, "", map[string]interface{}{"id": avID})
+	util.PushReloadAttrView(avID)
 }

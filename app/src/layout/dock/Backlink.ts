@@ -450,7 +450,6 @@ export class Backlink extends Model {
                     backlinkData: isMention ? response.data.backmentions : response.data.backlinks,
                     render: {
                         background: false,
-                        title: false,
                         gutter: true,
                         scroll: false,
                         breadcrumb: false,
@@ -463,6 +462,12 @@ export class Backlink extends Model {
     }
 
     public refresh() {
+        if (!this.blockId) {
+            return;
+        }
+        this.editors.forEach(item => {
+            item.destroy();
+        });
         const element = this.element.querySelector('.block__icon[data-type="refresh"] svg');
         element.classList.add("fn__rotate");
         fetchPost("/api/ref/refreshBacklink", {
@@ -581,7 +586,7 @@ export class Backlink extends Model {
                 backlinkMOpenIds: [],
                 backlinkMStatus: 3
             };
-            if (data.mentionsCount === 0) {
+            if (data.mentionsCount === 0 || window.siyuan.config.editor.backmentionExpandCount === -1) {
                 this.status[this.blockId].backlinkMStatus = 3;
             } else {
                 Array.from({length: window.siyuan.config.editor.backmentionExpandCount}).forEach((item, index) => {
@@ -589,8 +594,7 @@ export class Backlink extends Model {
                         this.status[this.blockId].backlinkMOpenIds.push(data.backmentions[index].id);
                     }
                 });
-                if (window.siyuan.config.editor.backmentionExpandCount === 0) {
-                    // 设置为 0 时需折叠
+                if (data.mentionsCount === 0) {
                     this.status[this.blockId].backlinkMStatus = 3;
                 } else {
                     if (data.linkRefsCount === 0) {

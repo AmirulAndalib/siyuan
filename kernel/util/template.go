@@ -17,10 +17,15 @@
 package util
 
 import (
-	"github.com/Masterminds/sprig/v3"
-	"github.com/spf13/cast"
 	"math"
 	"text/template"
+	"time"
+
+	"github.com/88250/go-humanize"
+	"github.com/Masterminds/sprig/v3"
+	"github.com/araddon/dateparse"
+	"github.com/siyuan-note/logging"
+	"github.com/spf13/cast"
 )
 
 func BuiltInTemplateFuncs() (ret template.FuncMap) {
@@ -33,6 +38,8 @@ func BuiltInTemplateFuncs() (ret template.FuncMap) {
 	ret["powf"] = powf
 	ret["log"] = log
 	ret["logf"] = logf
+	ret["parseTime"] = parseTime
+	ret["FormatFloat"] = FormatFloat
 	return
 }
 
@@ -42,3 +49,17 @@ func log(a, b interface{}) int64 {
 	return int64(math.Log(cast.ToFloat64(a)) / math.Log(cast.ToFloat64(b)))
 }
 func logf(a, b interface{}) float64 { return math.Log(cast.ToFloat64(a)) / math.Log(cast.ToFloat64(b)) }
+
+func parseTime(dateStr string) time.Time {
+	now := time.Now()
+	retTime, err := dateparse.ParseIn(dateStr, now.Location())
+	if nil != err {
+		logging.LogWarnf("parse date [%s] failed [%s], return current time instead", dateStr, err)
+		return now
+	}
+	return retTime
+}
+
+func FormatFloat(format string, n float64) string {
+	return humanize.FormatFloat(format, n)
+}

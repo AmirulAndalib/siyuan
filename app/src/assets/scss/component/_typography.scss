@@ -15,6 +15,7 @@
     margin: 0 auto;
 
     &.emoji {
+      width: 1.25em;
       cursor: auto;
       max-width: none;
       vertical-align: sub; // text-top windows 不兼容
@@ -51,11 +52,11 @@
   }
 
   span[data-type~="sup"] {
-    top: -0.5em;
+    top: -.5em;
   }
 
   span[data-type~="sub"] {
-    bottom: -0.25em;
+    bottom: -.25em;
   }
 
   em,
@@ -126,7 +127,7 @@
   .bq {
     padding: 4px;
     color: var(--b3-theme-on-surface);
-    border-left: 0.25em solid var(--b3-theme-surface-lighter);
+    border-left: .25em solid var(--b3-theme-surface-lighter);
     background-color: var(--b3-list-hover);
     margin: 4px 0;
   }
@@ -151,13 +152,13 @@
 
   .h1,
   h1 {
-    padding: 0.3em 4px;
+    padding: .3em 4px;
     font-size: 1.75em;
   }
 
   .h2,
   h2 {
-    padding: 0.3em 4px;
+    padding: .3em 4px;
     font-size: 1.55em;
   }
 
@@ -254,7 +255,7 @@
     display: inline-block !important;
     position: absolute !important;
     width: 1px !important;
-    right: 0 !important;
+    right: 7px !important;
     outline: 0 !important;
     background: 0 0 !important;
     text-decoration: initial !important;
@@ -281,6 +282,7 @@
         font-size: 85%;
         color: var(--b3-theme-on-surface);
         margin-top: -4px;
+        align-self: center;
       }
 
       .protyle-icon,
@@ -302,7 +304,7 @@
 
   .hljs {
     border-radius: var(--b3-border-radius);
-    padding: 1.6em 4px;
+    padding: 2em 4px 1.6em 4px;
     font-size: 85%;
     overflow: auto;
     font-family: var(--b3-font-family-code);
@@ -347,7 +349,9 @@
   }
 
   .katex {
-    // https://github.com/siyuan-note/siyuan/issues/10251 font-size: 113%;
+    // https://github.com/siyuan-note/siyuan/issues/10251
+    // https://github.com/siyuan-note/siyuan/issues/10321
+    // https://github.com/siyuan-note/siyuan/issues/10346
     line-height: normal; // https://ld246.com/article/1649890278771
 
     .mathnormal {
@@ -358,8 +362,9 @@
   [data-subtype="graphviz"] {
     text-align: center;
 
-    & > [contenteditable="false"] svg {
+    [contenteditable="false"] svg {
       border-radius: var(--b3-border-radius);
+      max-width: 100%; // https://github.com/siyuan-note/siyuan/issues/11181
 
       /* 由于会覆盖颜色，先移除看看有没有副作用 https://github.com/siyuan-note/siyuan/issues/7735
       polygon {
@@ -409,9 +414,17 @@
     margin: 0 auto;
     max-width: 100%;
     user-select: none;
+    word-break: keep-all;
+    white-space: nowrap;
+
+    & > span:nth-child(1),
+    & > span:nth-child(3) {
+      width: 4px;
+      display: inline-block;
+    }
 
     & > span:nth-child(2) {
-      max-width: calc(100% - 10px);
+      max-width: calc(100% - 8px);
       position: relative;
       display: inline-block;
       min-width: 22px;
@@ -422,6 +435,8 @@
       display: block;
       font-size: 85%;
       color: var(--b3-theme-on-surface);
+      word-break: break-word;
+      white-space: break-spaces;
     }
   }
 
@@ -480,6 +495,10 @@
     right: 4px;
     top: 4px;
     display: flex;
+
+    &--show {
+      opacity: .86;
+    }
   }
 
   &-icon {
@@ -540,7 +559,7 @@
       counter-reset: linenumber;
       font-size: 85%;
       background-color: var(--b3-theme-surface);
-      padding: 1.6em 4px;
+      padding: 2em 4px 1.6em 4px;
       box-sizing: border-box;
       border-radius: var(--b3-border-radius) 0 0 var(--b3-border-radius);
       width: 3.6em;
@@ -592,7 +611,7 @@
 
   &-task {
     list-style: none !important;
-    word-break: break-all;
+    word-break: break-word;
     position: relative;
 
     &--done > div[data-node-id].p {

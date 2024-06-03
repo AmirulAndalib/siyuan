@@ -8,6 +8,14 @@ const _NODE_ENV = NODE_ENV;
 
 const altNumber = navigator.platform.toUpperCase().indexOf("MAC") > -1 ? "⌃" : "⌥";
 
+const getFunctionKey = () => {
+    const fData: { [key: number]: string } = {};
+    for (let i = 1; i <= 32; i++) {
+        fData[i + 111] = "F" + i;
+    }
+    return fData;
+};
+
 export abstract class Constants {
     public static readonly SIYUAN_VERSION: string = _SIYUAN_VERSION;
     public static readonly NODE_ENV: string = _NODE_ENV;
@@ -47,16 +55,19 @@ export abstract class Constants {
     public static readonly SIYUAN_EXPORT_PDF: string = "siyuan-export-pdf";
     public static readonly SIYUAN_EXPORT_NEWWINDOW: string = "siyuan-export-newwindow";
 
+    public static readonly SIYUAN_CONTEXT_MENU: string = "siyuan-context-menu";
+
     // custom
     public static readonly CUSTOM_SY_READONLY: string = "custom-sy-readonly";
     public static readonly CUSTOM_SY_FULLWIDTH: string = "custom-sy-fullwidth";
+    public static readonly CUSTOM_SY_AV_VIEW: string = "custom-sy-av-view";
     public static readonly CUSTOM_REMINDER_WECHAT: string = "custom-reminder-wechat";
     public static readonly CUSTOM_RIFF_DECKS: string = "custom-riff-decks";
 
     // size
     public static readonly SIZE_SCROLL_TB: number = 24;
     public static readonly SIZE_SCROLL_STEP: number = 256;
-    public static readonly SIZE_LINK_TEXT_MAX: number = 24;
+    public static readonly SIZE_LINK_TEXT_MAX: number = 64;
     public static readonly SIZE_TOOLBAR_HEIGHT: number = isMobile() ? 0 : 32;
     public static readonly SIZE_GET_MAX = 102400;
     public static readonly SIZE_UNDO = 64;
@@ -82,15 +93,17 @@ export abstract class Constants {
     public static readonly CB_GET_ROOTSCROLL = "cb-get-rootscroll"; // 如果为 rootID 就滚动到指定位置，必有 rootID
     public static readonly CB_GET_HTML = "cb-get-html"; // 直接渲染，不需要再 /api/block/getDocInfo，否则搜索表格无法定位
     public static readonly CB_GET_HISTORY = "cb-get-history"; // 历史渲染
+    public static readonly CB_GET_OPENNEW = "cb-get-opennew"; // 编辑器只读后新建文件需为临时解锁状态
 
     // localstorage
     public static readonly LOCAL_ZOOM = "local-zoom";
     public static readonly LOCAL_SEARCHDATA = "local-searchdata";
     public static readonly LOCAL_SEARCHKEYS = "local-searchkeys";
     public static readonly LOCAL_SEARCHASSET = "local-searchasset";
+    public static readonly LOCAL_SEARCHUNREF = "local-searchunref";
     public static readonly LOCAL_DOCINFO = "local-docinfo"; // only mobile
     public static readonly LOCAL_DAILYNOTEID = "local-dailynoteid"; // string
-    public static readonly LOCAL_HISTORYNOTEID = "local-historynoteid"; // string
+    public static readonly LOCAL_HISTORY = "local-history";
     public static readonly LOCAL_CODELANG = "local-codelang"; // string
     public static readonly LOCAL_FONTSTYLES = "local-fontstyles";
     public static readonly LOCAL_EXPORTPDF = "local-exportpdf";
@@ -105,6 +118,7 @@ export abstract class Constants {
     public static readonly LOCAL_FILEPOSITION = "local-fileposition";
     public static readonly LOCAL_DIALOGPOSITION = "local-dialogposition";
     public static readonly LOCAL_SESSION_FIRSTLOAD = "local-session-firstload";
+    public static readonly LOCAL_OUTLINE = "local-outline";
 
     // dialog
     public static readonly DIALOG_OPENCARD = "dialog-opencard";
@@ -176,10 +190,12 @@ export abstract class Constants {
         zh_CHT: "20211226090932-5lcq56f",
         en_US: "20210808180117-6v0mkxr",
         fr_FR: "20210808180117-6v0mkxr",
+        es_ES: "20210808180117-6v0mkxr",
+        ja_JP: "20240530133126-axarxgx",
     };
     public static readonly QUICK_DECK_ID = "20230218211946-2kw8jgx";
 
-    public static readonly KEYCODELIST: { [key: number]: string } = {
+    public static KEYCODELIST: { [key: number]: string } = Object.assign(getFunctionKey(), {
         8: "⌫",
         9: "⇥",
         13: "↩",
@@ -255,18 +271,6 @@ export abstract class Constants {
         109: "-",
         110: ".",
         111: "/",
-        112: "F1",
-        113: "F2",
-        114: "F3",
-        115: "F4",
-        116: "F5",
-        117: "F6",
-        118: "F7",
-        119: "F8",
-        120: "F9",
-        121: "F10",
-        122: "F11",
-        123: "F12",
         144: "NumLock",
         145: "ScrollLock",
         182: "MyComputer",
@@ -282,12 +286,12 @@ export abstract class Constants {
         220: "\\",
         221: "]",
         222: "'",
-    };
+    });
     // 冲突不使用 "⌘S/Q"
     // "⌘", "⇧", "⌥", "⌃"
     // "⌘A", "⌘X", "⌘C", "⌘V", "⌘-", "⌘=", "⌘0", "⇧⌘V", "⌘/", "⇧↑", "⇧↓", "⇧→", "⇧←", "⇧⇥", "⌃D", "⇧⌘→", "⇧⌘←",
     // "⌘Home", "⌘End", "⇧↩", "↩", "PageUp", "PageDown", "⌫", "⌦", "Escape" 不可自定义
-    public static readonly SIYUAN_KEYMAP: IKeymap = {
+    public static readonly SIYUAN_KEYMAP: Config.IKeymap = {
         general: {
             mainMenu: {default: "⌥\\", custom: "⌥\\"},
             commandPanel: {default: "⌥⇧P", custom: "⌥⇧P"},
@@ -344,24 +348,15 @@ export abstract class Constants {
             closeLeft: {default: "", custom: ""},
             closeRight: {default: "", custom: ""},
             tabToWindow: {default: "", custom: ""},
+            addToDatabase: {default: "", custom: ""},
+            unsplit: {default: "", custom: ""},
+            unsplitAll: {default: "", custom: ""},
         },
         editor: {
             general: {
                 duplicate: {default: "⌘D", custom: "⌘D"},
                 expandDown: {default: "⌥⇧↓", custom: "⌥⇧↓"},
                 expandUp: {default: "⌥⇧↑", custom: "⌥⇧↑"},
-                copyPlainText: {default: "", custom: ""},
-                copyID: {default: "", custom: ""},
-                copyProtocolInMd: {default: "", custom: ""},
-                netImg2LocalAsset: {default: "", custom: ""},
-                netAssets2LocalAssets: {default: "", custom: ""},
-                optimizeTypography: {default: "", custom: ""},
-                hLayout: {default: "", custom: ""},
-                vLayout: {default: "", custom: ""},
-                refPopover: {default: "", custom: ""},
-                copyText: {default: "", custom: ""},
-                exitFocus: {default: "", custom: ""},
-                switchReadonly: {default: "", custom: ""},
                 expand: {default: "⌘↓", custom: "⌘↓"},
                 collapse: {default: "⌘↑", custom: "⌘↑"},
                 insertBottom: {default: "⌥⌘.", custom: "⌥⌘."},
@@ -395,8 +390,24 @@ export abstract class Constants {
                 insertBefore: {default: "⇧⌘B", custom: "⇧⌘B"},
                 insertAfter: {default: "⇧⌘A", custom: "⇧⌘A"},
                 jumpToParentNext: {default: "⇧⌘N", custom: "⇧⌘N"},
+                jumpToParentPrev: {default: "⇧⌘M", custom: "⇧⌘M"},
+                jumpToParent: {default: "⇧⌘J", custom: "⇧⌘J"},
                 moveToUp: {default: "⇧⌘↑", custom: "⇧⌘↑"},
                 moveToDown: {default: "⇧⌘↓", custom: "⇧⌘↓"},
+                duplicateCompletely: {default: "", custom: ""},
+                copyPlainText: {default: "", custom: ""},
+                copyID: {default: "", custom: ""},
+                copyProtocolInMd: {default: "", custom: ""},
+                netImg2LocalAsset: {default: "", custom: ""},
+                netAssets2LocalAssets: {default: "", custom: ""},
+                optimizeTypography: {default: "", custom: ""},
+                hLayout: {default: "", custom: ""},
+                vLayout: {default: "", custom: ""},
+                refPopover: {default: "", custom: ""},
+                copyText: {default: "", custom: ""},
+                exitFocus: {default: "", custom: ""},
+                ai: {default: "", custom: ""},
+                switchReadonly: {default: "", custom: ""},
             },
             insert: {
                 appearance: {default: "⌥⌘X", custom: "⌥⌘X"},
@@ -450,7 +461,7 @@ export abstract class Constants {
         plugin: {},
     };
 
-    public static readonly SIYUAN_EMPTY_LAYOUT: Record<string, unknown> = {
+    public static readonly SIYUAN_EMPTY_LAYOUT: Config.IUiLayout = {
         hideDock: false,
         layout: {
             "direction": "tb",
@@ -481,7 +492,13 @@ export abstract class Constants {
                     "size": "auto",
                     "type": "center",
                     "instance": "Layout",
-                    "children": [{"instance": "Wnd", "children": [{"instance": "Tab", "children": []}]}]
+                    "children": [{
+                        "instance": "Wnd",
+                        "children": [{
+                            "instance": "Tab",
+                            "children": []
+                        }]
+                    }]
                 }, {
                     "direction": "tb",
                     "size": "0px",
@@ -522,13 +539,13 @@ export abstract class Constants {
             data: [
                 [{
                     type: "file",
-                    size: {width: 227, height: 0},
+                    size: {width: 232, height: 0},
                     show: true,
                     icon: "iconFiles",
                     hotkeyLangId: "fileTree",
                 }, {
                     type: "outline",
-                    size: {width: 227, height: 0},
+                    size: {width: 232, height: 0},
                     show: false,
                     icon: "iconAlignCenter",
                     hotkeyLangId: "outline",
@@ -540,13 +557,13 @@ export abstract class Constants {
                     hotkeyLangId: "inbox",
                 }], [{
                     type: "bookmark",
-                    size: {width: 227, height: 0},
+                    size: {width: 232, height: 0},
                     show: false,
                     icon: "iconBookmark",
                     hotkeyLangId: "bookmark",
                 }, {
                     type: "tag",
-                    size: {width: 227, height: 0},
+                    size: {width: 232, height: 0},
                     show: false,
                     icon: "iconTags",
                     hotkeyLangId: "tag",
@@ -579,9 +596,7 @@ export abstract class Constants {
         }
     };
 
-    public static readonly SIYUAN_DEFAULT_REPLACETYPES: {
-        [key: string]: boolean;
-    } = {
+    public static readonly SIYUAN_DEFAULT_REPLACETYPES: Required<Config.IUILayoutTabSearchConfigReplaceTypes> = {
         "text": true,
         "imgText": true,
         "imgTitle": true,
@@ -668,6 +683,9 @@ export abstract class Constants {
     // third: "yul", "solidity", "abap", "hlsl", "gdscript"
     public static readonly ALIAS_CODE_LANGUAGES: string[] = [
         "js", "ts", "html", "toml", "c#", "bat",
+    ];
+    public static readonly SIYUAN_RENDER_CODE_LANGUAGES: string[] = [
+        "abc", "plantuml", "mermaid", "flowchart", "echarts", "mindmap", "graphviz", "math"
     ];
 
     // Google Analytics 事件

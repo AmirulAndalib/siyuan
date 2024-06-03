@@ -10,7 +10,7 @@ import { ipcRenderer } from "electron";
 import {MenuItem} from "../menus/Menu";
 import {Constants} from "../constants";
 import {toggleDockBar} from "./dock/util";
-import {updateHotkeyTip} from "../protyle/util/compatibility";
+import {isIPad, updateHotkeyTip} from "../protyle/util/compatibility";
 
 export const initStatus = (isWindow = false) => {
     /// #if !MOBILE
@@ -48,7 +48,7 @@ export const initStatus = (isWindow = false) => {
                 JSON.parse(target.getAttribute("data-tasks")).forEach((item: { action: string }) => {
                     window.siyuan.menus.menu.append(new MenuItem({
                         type: "readonly",
-                        iconHTML: Constants.ZWSP,
+                        iconHTML: "",
                         label: item.action
                     }).element);
                 });
@@ -64,13 +64,15 @@ export const initStatus = (isWindow = false) => {
                 }
                 window.siyuan.menus.menu.remove();
                 window.siyuan.menus.menu.element.setAttribute("data-name", "statusHelp");
-                window.siyuan.menus.menu.append(new MenuItem({
-                    label: window.siyuan.languages.help,
-                    icon: "iconHelp",
-                    click: () => {
-                        mountHelp();
-                    }
-                }).element);
+                if (!isIPad()) {
+                    window.siyuan.menus.menu.append(new MenuItem({
+                        label: window.siyuan.languages.userGuide,
+                        icon: "iconHelp",
+                        click: () => {
+                            mountHelp();
+                        }
+                    }).element);
+                }
                 window.siyuan.menus.menu.append(new MenuItem({
                     label: window.siyuan.languages.feedback,
                     icon: "iconFeedback",
