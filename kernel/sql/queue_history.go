@@ -33,8 +33,7 @@ import (
 var (
 	historyOperationQueue []*historyDBQueueOperation
 	historyDBQueueLock    = sync.Mutex{}
-
-	historyTxLock = sync.Mutex{}
+	historyTxLock         = sync.Mutex{}
 )
 
 type historyDBQueueOperation struct {
@@ -42,7 +41,7 @@ type historyDBQueueOperation struct {
 	action      string // index/deleteOutdated
 
 	histories []*History // index
-	before    string     // deleteOutdated
+	before    int64      // deleteOutdated
 }
 
 func FlushHistoryTxJob() {
@@ -51,7 +50,8 @@ func FlushHistoryTxJob() {
 
 func FlushHistoryQueue() {
 	ops := getHistoryOperations()
-	if 1 > len(ops) {
+	total := len(ops)
+	if 1 > total {
 		return
 	}
 
@@ -97,7 +97,7 @@ func FlushHistoryQueue() {
 		}
 	}
 
-	if 128 < len(ops) {
+	if 128 < total {
 		debug.FreeOSMemory()
 	}
 
@@ -121,7 +121,7 @@ func execHistoryOp(op *historyDBQueueOperation, tx *sql.Tx, context map[string]i
 	return
 }
 
-func DeleteOutdatedHistories(before string) {
+func DeleteOutdatedHistories(before int64) {
 	historyDBQueueLock.Lock()
 	defer historyDBQueueLock.Unlock()
 

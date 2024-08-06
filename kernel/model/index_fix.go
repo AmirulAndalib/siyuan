@@ -40,27 +40,36 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-// FixIndexJob 自动校验数据库索引 https://github.com/siyuan-note/siyuan/issues/7016
-func FixIndexJob() {
-	task.AppendTask(task.DatabaseIndexFix, removeDuplicateDatabaseIndex)
-	sql.WaitForWritingDatabase()
+var (
+	checkIndexOnce = sync.Once{}
+)
 
-	task.AppendTask(task.DatabaseIndexFix, resetDuplicateBlocksOnFileSys)
+// checkIndex 自动校验数据库索引，仅在数据同步执行完成后执行一次。
+func checkIndex() {
+	checkIndexOnce.Do(func() {
+		logging.LogInfof("start checking index...")
 
-	task.AppendTask(task.DatabaseIndexFix, fixBlockTreeByFileSys)
-	sql.WaitForWritingDatabase()
+		task.AppendTask(task.DatabaseIndexFix, removeDuplicateDatabaseIndex)
+		sql.WaitForWritingDatabase()
 
-	task.AppendTask(task.DatabaseIndexFix, fixDatabaseIndexByBlockTree)
-	sql.WaitForWritingDatabase()
+		task.AppendTask(task.DatabaseIndexFix, resetDuplicateBlocksOnFileSys)
 
-	task.AppendTask(task.DatabaseIndexFix, removeDuplicateDatabaseRefs)
+		task.AppendTask(task.DatabaseIndexFix, fixBlockTreeByFileSys)
+		sql.WaitForWritingDatabase()
 
-	// 后面要加任务的话记得修改推送任务栏的进度 util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 1, 5))
+		task.AppendTask(task.DatabaseIndexFix, fixDatabaseIndexByBlockTree)
+		sql.WaitForWritingDatabase()
 
-	task.AppendTask(task.DatabaseIndexFix, func() {
-		util.PushStatusBar(Conf.Language(185))
+		task.AppendTask(task.DatabaseIndexFix, removeDuplicateDatabaseRefs)
+
+		// 后面要加任务的话记得修改推送任务栏的进度 util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 1, 5))
+
+		task.AppendTask(task.DatabaseIndexFix, func() {
+			util.PushStatusBar(Conf.Language(185))
+		})
+		debug.FreeOSMemory()
+		logging.LogInfof("finish checking index")
 	})
-	debug.FreeOSMemory()
 }
 
 var autoFixLock = sync.Mutex{}
@@ -161,7 +170,7 @@ func resetDuplicateBlocksOnFileSys() {
 
 			if info.IsDir() {
 				if boxPath == path {
-					// 跳过根路径（笔记本文件夹）
+					// 跳过笔记本文件夹
 					return nil
 				}
 
@@ -170,14 +179,6 @@ func resetDuplicateBlocksOnFileSys() {
 				}
 
 				if !ast.IsNodeIDPattern(info.Name()) {
-					return nil
-				}
-
-				if util.IsEmptyDir(filepath.Join(path)) {
-					// 删除空的子文档文件夹
-					if removeErr := os.RemoveAll(path); nil != removeErr {
-						logging.LogErrorf("remove empty folder failed: %s", removeErr)
-					}
 					return nil
 				}
 				return nil
@@ -267,7 +268,7 @@ func recreateTree(tree *parse.Tree, absPath string) {
 	treenode.RemoveBlockTreesByPathPrefix(strings.TrimSuffix(tree.Path, ".sy"))
 	treenode.RemoveBlockTreesByRootID(tree.ID)
 
-	resetTree(tree, "")
+	resetTree(tree, "", true)
 	if err := filesys.WriteTree(tree); nil != err {
 		logging.LogWarnf("write tree [%s] failed: %s", tree.Path, err)
 		return
@@ -283,7 +284,7 @@ func recreateTree(tree *parse.Tree, absPath string) {
 		}
 	}
 
-	if err := os.RemoveAll(absPath); nil != err {
+	if err := filelock.Remove(absPath); nil != err {
 		logging.LogWarnf("remove [%s] failed: %s", absPath, err)
 		return
 	}
@@ -411,7 +412,7 @@ func reindexTreeByUpdated(rootUpdatedMap, dbRootUpdatedMap map[string]string) {
 	}
 
 	var rootIDs []string
-	for rootID, _ := range dbRootUpdatedMap {
+	for rootID := range dbRootUpdatedMap {
 		if _, ok := rootUpdatedMap[rootID]; !ok {
 			rootIDs = append(rootIDs, rootID)
 		}
@@ -475,10 +476,10 @@ func reindexTree0(tree *parse.Tree, i, size int) {
 	if "" == updated {
 		updated = util.TimeFromID(tree.Root.ID)
 		tree.Root.SetIALAttr("updated", updated)
-		indexWriteJSONQueue(tree)
+		indexWriteTreeUpsertQueue(tree)
 	} else {
-		treenode.IndexBlockTree(tree)
-		sql.IndexTreeQueue(tree.Box, tree.Path)
+		treenode.UpsertBlockTree(tree)
+		sql.IndexTreeQueue(tree)
 	}
 
 	if 0 == i%64 {

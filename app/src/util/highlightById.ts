@@ -32,29 +32,39 @@ export const highlightById = (protyle: IProtyle, id: string, top = false) => {
         bgFade(nodeElement);
         return nodeElement;// 仅配合前进后退使用
     }
-    if (id === protyle.block.rootID && protyle.options.render.title) {
+    if (id === protyle.block.rootID && protyle.options.render.title && protyle.title.editElement) {
         bgFade(protyle.title.editElement);
         return protyle.title.editElement;
     }
 };
 
 export const scrollCenter = (protyle: IProtyle, nodeElement?: Element, top = false, behavior: ScrollBehavior = "auto") => {
-    if (!protyle.disabled && !top && getSelection().rangeCount > 0 && hasClosestBlock(getSelection().getRangeAt(0).startContainer)) {
-        const editorElement = protyle.contentElement;
-        const cursorTop = getSelectionPosition(editorElement).top - editorElement.getBoundingClientRect().top;
-        let top = 0;
-        if (cursorTop < 0) {
-            top = editorElement.scrollTop + cursorTop;
-        } else if (cursorTop > editorElement.clientHeight - 74) {   // 74 = 移动端底部 + 段落块高度
-            top = editorElement.scrollTop + (cursorTop + 74 - editorElement.clientHeight);
+    if (!protyle.disabled && !top && getSelection().rangeCount > 0) {
+        const blockElement = hasClosestBlock(getSelection().getRangeAt(0).startContainer);
+        if (blockElement) {
+            // undo 时禁止数据库滚动
+            if (blockElement.classList.contains("av") && blockElement.dataset.render === "true" &&
+                (blockElement.querySelector(".av__row--header").getAttribute("style")?.indexOf("transform") > -1 || blockElement.querySelector(".av__row--footer").getAttribute("style")?.indexOf("transform") > -1)) {
+                return;
+            }
+            const editorElement = protyle.contentElement;
+            const cursorTop = getSelectionPosition(editorElement).top - editorElement.getBoundingClientRect().top;
+            let scrollTop = 0;
+            if (cursorTop < 0) {
+                scrollTop = editorElement.scrollTop + cursorTop;
+            } else if (cursorTop > editorElement.clientHeight - 74) {   // 74 = 移动端底部 + 段落块高度
+                scrollTop = editorElement.scrollTop + (cursorTop + 74 - editorElement.clientHeight);
+            }
+            if (scrollTop !== 0) {
+                editorElement.scroll({top: scrollTop, behavior});
+            }
+            return;
         }
-        if (top !== 0) {
-            editorElement.scroll({top, behavior});
-        }
-        return;
     }
 
-    if (!nodeElement) {
+    if (!nodeElement &&
+        // https://github.com/siyuan-note/siyuan/issues/11175
+        document.activeElement?.tagName !== "TEXTAREA" && document.activeElement?.tagName !== "INPUT") {
         nodeElement = hasClosestBlock(getEditorRange(protyle.wysiwyg.element).startContainer) as HTMLElement;
     }
     if (!nodeElement) {

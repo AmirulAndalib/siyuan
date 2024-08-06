@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/88250/gulu"
 	"github.com/88250/lute/parse"
@@ -34,7 +33,6 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 	"github.com/siyuan-note/eventbus"
 	"github.com/siyuan-note/logging"
-	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
@@ -391,23 +389,7 @@ func insertFileAnnotationRefs0(tx *sql.Tx, bulk []*FileAnnotationRef) (err error
 	return
 }
 
-func insertRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
-	refs, fileAnnotationRefs := refsFromTree(tree)
-	if err = insertBlockRefs(tx, refs); nil != err {
-		return
-	}
-	if err = insertFileAnnotationRefs(tx, fileAnnotationRefs); nil != err {
-		return
-	}
-	return err
-}
-
-func indexTree(tx *sql.Tx, box, p string, context map[string]interface{}) (err error) {
-	tree, err := filesys.LoadTree(box, p, luteEngine)
-	if nil != err {
-		return
-	}
-
+func indexTree(tx *sql.Tx, tree *parse.Tree, context map[string]interface{}) (err error) {
 	blocks, spans, assets, attributes := fromTree(tree.Root, tree)
 	refs, fileAnnotationRefs := refsFromTree(tree)
 	err = insertTree0(tx, tree, context, blocks, spans, assets, attributes, refs, fileAnnotationRefs)
@@ -447,13 +429,13 @@ func upsertTree(tx *sql.Tx, tree *parse.Tree, context map[string]interface{}) (e
 		return
 	}
 
-	if err = deleteSpansByPathTx(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteSpansByRootID(tx, tree.ID); nil != err {
 		return
 	}
-	if err = deleteAssetsByPathTx(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteAssetsByRootID(tx, tree.ID); nil != err {
 		return
 	}
-	if err = deleteAttributesByPathTx(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteAttributesByRootID(tx, tree.ID); nil != err {
 		return
 	}
 	if err = deleteRefsByPathTx(tx, tree.Box, tree.Path); nil != err {
@@ -511,24 +493,22 @@ func insertTree0(tx *sql.Tx, tree *parse.Tree, context map[string]interface{},
 }
 
 var (
-	indexIgnoreLastModified int64
-	indexIgnore             []string
-	indexIgnoreLock         = sync.Mutex{}
+	IndexIgnoreCached bool
+	indexIgnore       []string
+	indexIgnoreLock   = sync.Mutex{}
 )
 
 func getIndexIgnoreLines() (ret []string) {
 	// Support ignore index https://github.com/siyuan-note/siyuan/issues/9198
 
-	now := time.Now().UnixMilli()
-	if now-indexIgnoreLastModified < 30*1000 {
+	if IndexIgnoreCached {
 		return indexIgnore
 	}
 
 	indexIgnoreLock.Lock()
 	defer indexIgnoreLock.Unlock()
 
-	indexIgnoreLastModified = now
-
+	IndexIgnoreCached = true
 	indexIgnorePath := filepath.Join(util.DataDir, ".siyuan", "indexignore")
 	err := os.MkdirAll(filepath.Dir(indexIgnorePath), 0755)
 	if nil != err {

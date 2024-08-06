@@ -18,13 +18,13 @@ import {Menu} from "../plugin/Menu";
 import {fetchPost} from "../util/fetch";
 import {needSubscribe} from "../util/needSubscribe";
 import * as dayjs from "dayjs";
-import {commandPanel} from "../plugin/commandPanel";
 import {exportLayout} from "./util";
+import {commandPanel} from "../boot/globalEvent/command/panel";
 
 export const initBar = (app: App) => {
     const toolbarElement = document.getElementById("toolbar");
     toolbarElement.innerHTML = `
-<div id="barWorkspace" aria-label="${window.siyuan.languages.mainMenu} ${updateHotkeyTip(window.siyuan.config.keymap.general.mainMenu.custom)}" class="ariaLabel toolbar__item toolbar__item--active">
+<div id="barWorkspace" class="ariaLabel toolbar__item toolbar__item--active" aria-label="${window.siyuan.languages.mainMenu} ${updateHotkeyTip(window.siyuan.config.keymap.general.mainMenu.custom)}">
     <span class="toolbar__text">${getWorkspaceName()}</span>
     <svg class="toolbar__svg"><use xlink:href="#iconDown"></use></svg>
 </div>
@@ -41,6 +41,9 @@ export const initBar = (app: App) => {
 <div id="toolbarVIP" class="fn__flex${window.siyuan.config.readonly ? " fn__none" : ""}"></div>
 <div id="barPlugins" class="toolbar__item ariaLabel" aria-label="${window.siyuan.languages.plugin}">
     <svg><use xlink:href="#iconPlugin"></use></svg>
+</div>
+<div id="barCommand" class="toolbar__item ariaLabel" aria-label="${window.siyuan.languages.commandPanel} ${updateHotkeyTip(window.siyuan.config.keymap.general.commandPanel.custom)}">
+    <svg><use xlink:href="#iconTerminal"></use></svg>
 </div>
 <div id="barSearch" class="toolbar__item ariaLabel" aria-label="${window.siyuan.languages.globalSearch} ${updateHotkeyTip(window.siyuan.config.keymap.general.globalSearch.custom)}">
     <svg><use xlink:href="#iconSearch"></use></svg>
@@ -179,6 +182,10 @@ export const initBar = (app: App) => {
                 openPlugin(app, target);
                 event.stopPropagation();
                 break;
+            } else if (targetId === "barCommand") {
+                commandPanel(app);
+                event.stopPropagation();
+                break;
             } else if (targetId === "barZoom") {
                 if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
                     window.siyuan.menus.menu.element.getAttribute("data-name") === "barZoom") {
@@ -294,24 +301,15 @@ export const setZoom = (type: "zoomIn" | "zoomOut" | "restore") => {
 
 const openPlugin = (app: App, target: Element) => {
     const menu = new Menu("topBarPlugin");
-    if (!isHuawei()) {
-        menu.addItem({
-            icon: "iconSettings",
-            label: window.siyuan.languages.manage,
-            click() {
-                openSetting(app).element.querySelector('.b3-tab-bar [data-name="bazaar"]').dispatchEvent(new CustomEvent("click"));
-            }
-        });
-    }
     menu.addItem({
-        icon: "iconLayoutBottom",
-        accelerator: window.siyuan.config.keymap.general.commandPanel.custom,
-        label: window.siyuan.languages.commandPanel,
+        icon: "iconSettings",
+        label: window.siyuan.languages.manage,
+        ignore: isHuawei() || window.siyuan.config.readonly,
         click() {
-            commandPanel(app);
+            openSetting(app).element.querySelector('.b3-tab-bar [data-name="bazaar"]').dispatchEvent(new CustomEvent("click"));
         }
     });
-    menu.addSeparator();
+    menu.addSeparator(undefined, isHuawei() || window.siyuan.config.readonly);
     let hasPlugin = false;
     app.plugins.forEach((plugin) => {
         // @ts-ignore
@@ -375,7 +373,7 @@ const openPlugin = (app: App, target: Element) => {
         }
     });
     if (!hasPlugin) {
-        window.siyuan.menus.menu.element.querySelector(".b3-menu__separator").remove();
+        window.siyuan.menus.menu.element.querySelector(".b3-menu__separator")?.remove();
     }
     let rect = target.getBoundingClientRect();
     if (rect.width === 0) {

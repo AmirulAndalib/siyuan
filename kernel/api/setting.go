@@ -25,9 +25,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/server/proxy"
 	"github.com/siyuan-note/siyuan/kernel/sql"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+func setEditorReadOnly(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	readOnly := arg["readonly"].(bool)
+
+	oldReadOnly := model.Conf.Editor.ReadOnly
+	model.Conf.Editor.ReadOnly = readOnly
+	model.Conf.Save()
+
+	if oldReadOnly != model.Conf.Editor.ReadOnly {
+		util.BroadcastByType("protyle", "readonly", 0, "", model.Conf.Editor.ReadOnly)
+		util.BroadcastByType("main", "readonly", 0, "", model.Conf.Editor.ReadOnly)
+	}
+}
 
 func setConfSnippet(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
@@ -173,6 +195,14 @@ func setAI(c *gin.Context) {
 		ai.OpenAI.APIMaxTokens = 0
 	}
 
+	if 0 >= ai.OpenAI.APITemperature || 2 < ai.OpenAI.APITemperature {
+		ai.OpenAI.APITemperature = 1.0
+	}
+
+	if 1 > ai.OpenAI.APIMaxContexts || 64 < ai.OpenAI.APIMaxContexts {
+		ai.OpenAI.APIMaxContexts = 7
+	}
+
 	model.Conf.AI = ai
 	model.Conf.Save()
 
@@ -301,6 +331,8 @@ func setEditor(c *gin.Context) {
 		util.BroadcastByType("main", "readonly", 0, "", model.Conf.Editor.ReadOnly)
 	}
 
+	util.MarkdownSettings = model.Conf.Editor.Markdown
+
 	ret.Data = model.Conf.Editor
 }
 
@@ -374,9 +406,6 @@ func setFiletree(c *gin.Context) {
 	}
 
 	fileTree.DocCreateSavePath = strings.TrimSpace(fileTree.DocCreateSavePath)
-	if "../" == fileTree.DocCreateSavePath {
-		fileTree.DocCreateSavePath = "../Untitled"
-	}
 
 	if 1 > fileTree.MaxOpenTabCount {
 		fileTree.MaxOpenTabCount = 8
@@ -505,9 +534,65 @@ func setAppearance(c *gin.Context) {
 	ret.Data = model.Conf.Appearance
 }
 
+func setPublish(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	param, err := gulu.JSON.MarshalJSON(arg)
+	if nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	publish := &conf.Publish{}
+	if err = gulu.JSON.UnmarshalJSON(param, publish); nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	model.Conf.Publish = publish
+	model.Conf.Save()
+
+	if port, err := proxy.InitPublishService(); err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+	} else {
+		ret.Data = map[string]any{
+			"port":    port,
+			"publish": model.Conf.Publish,
+		}
+	}
+}
+
+func getPublish(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	if port, err := proxy.InitPublishService(); err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+	} else {
+		ret.Data = map[string]any{
+			"port":    port,
+			"publish": model.Conf.Publish,
+		}
+	}
+}
+
 func getCloudUser(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
+
+	if !model.IsAdminRoleContext(c) {
+		return
+	}
 
 	arg, ok := util.JsonArg(c, ret)
 	if !ok {

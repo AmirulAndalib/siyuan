@@ -15,7 +15,7 @@ const getRightBlock = (element: HTMLElement, x: number, y: number) => {
 };
 
 export const windowMouseMove = (event: MouseEvent & { target: HTMLElement }, mouseIsEnter: boolean) => {
-    if (document.body.classList.contains("body--blur")) {
+    if (document.body.classList.contains("body--blur") || document.getElementById("progress")) {
         // 非激活状态下不执行 https://ld246.com/article/1693474547631
         return;
     }
@@ -48,13 +48,13 @@ export const windowMouseMove = (event: MouseEvent & { target: HTMLElement }, mou
         event.buttons === 0 &&  // 鼠标按键被按下时不触发
         window.siyuan.layout.bottomDock &&
         !isWindow()) {
-        if (event.clientX < 43) {
+        if (event.clientX < Math.max(document.getElementById("dockLeft").clientWidth + 1, 16)) {
             if (!window.siyuan.layout.leftDock.pin && window.siyuan.layout.leftDock.layout.element.clientWidth > 0 &&
                 // 隐藏停靠栏会导致点击两侧内容触发浮动面板弹出，因此需减小鼠标范围
                 (window.siyuan.layout.leftDock.element.clientWidth > 0 || (window.siyuan.layout.leftDock.element.clientWidth === 0 && event.clientX < 8))) {
                 if (event.clientY > document.getElementById("toolbar").clientHeight &&
                     event.clientY < window.innerHeight - document.getElementById("status").clientHeight - document.getElementById("dockBottom").clientHeight) {
-                    if (!hasClosestByClassName(event.target, "b3-menu") &&
+                    if (!hasClosestByClassName(event.target, "b3-menu") && !hasClosestByClassName(event.target, "protyle-toolbar") &&
                         !hasClosestByClassName(event.target, "layout--float")) {
                         window.siyuan.layout.leftDock.showDock();
                     }
@@ -62,12 +62,12 @@ export const windowMouseMove = (event: MouseEvent & { target: HTMLElement }, mou
                     window.siyuan.layout.leftDock.hideDock();
                 }
             }
-        } else if (event.clientX > window.innerWidth - 41) {
+        } else if (event.clientX > window.innerWidth - Math.max(document.getElementById("dockRight").clientWidth - 2, 16)) {
             if (!window.siyuan.layout.rightDock.pin && window.siyuan.layout.rightDock.layout.element.clientWidth > 0 &&
                 (window.siyuan.layout.rightDock.element.clientWidth > 0 || (window.siyuan.layout.rightDock.element.clientWidth === 0 && event.clientX > window.innerWidth - 8))) {
                 if (event.clientY > document.getElementById("toolbar").clientHeight &&
                     event.clientY < window.innerHeight - document.getElementById("status").clientHeight - document.getElementById("dockBottom").clientHeight) {
-                    if (!hasClosestByClassName(event.target, "layout--float")) {
+                    if (!hasClosestByClassName(event.target, "layout--float") && !hasClosestByClassName(event.target, "protyle-toolbar")) {
                         window.siyuan.layout.rightDock.showDock();
                     }
                 } else {
@@ -75,7 +75,7 @@ export const windowMouseMove = (event: MouseEvent & { target: HTMLElement }, mou
                 }
             }
         }
-        if (event.clientY > Math.min(window.innerHeight - 10, window.innerHeight - (window.siyuan.config.uiLayout.hideDock ? 0 : 42) - document.querySelector("#status").clientHeight)) {
+        if (event.clientY > Math.min(window.innerHeight - 10, window.innerHeight - (window.siyuan.config.uiLayout.hideDock ? 0 : document.getElementById("dockBottom").clientHeight) - document.querySelector("#status").clientHeight)) {
             window.siyuan.layout.bottomDock.showDock();
         }
     }

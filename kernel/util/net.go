@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +28,6 @@ import (
 	"github.com/88250/lute/ast"
 	"github.com/gin-gonic/gin"
 	"github.com/imroc/req/v3"
-	"github.com/olahol/melody"
 	"github.com/siyuan-note/httpclient"
 	"github.com/siyuan-note/logging"
 )
@@ -91,6 +91,19 @@ func IsOnline(checkURL string, skipTlsVerify bool) bool {
 	return false
 }
 
+func IsPortOpen(port string) bool {
+	timeout := time.Second
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), timeout)
+	if nil != err {
+		return false
+	}
+	if nil != conn {
+		conn.Close()
+		return true
+	}
+	return false
+}
+
 func isOnline(checkURL string, skipTlsVerify bool) (ret bool) {
 	c := req.C().SetTimeout(3 * time.Second)
 	if skipTlsVerify {
@@ -125,15 +138,15 @@ func isOnline(checkURL string, skipTlsVerify bool) (ret bool) {
 	return
 }
 
-func GetRemoteAddr(session *melody.Session) string {
-	ret := session.Request.Header.Get("X-forwarded-for")
+func GetRemoteAddr(req *http.Request) string {
+	ret := req.Header.Get("X-forwarded-for")
 	ret = strings.TrimSpace(ret)
 	if "" == ret {
-		ret = session.Request.Header.Get("X-Real-IP")
+		ret = req.Header.Get("X-Real-IP")
 	}
 	ret = strings.TrimSpace(ret)
 	if "" == ret {
-		return session.Request.RemoteAddr
+		return req.RemoteAddr
 	}
 	return strings.Split(ret, ",")[0]
 }
@@ -168,4 +181,13 @@ func IsValidURL(str string) bool {
 func initHttpClient() {
 	http.DefaultClient = httpclient.GetCloudFileClient2Min()
 	http.DefaultTransport = httpclient.NewTransport(false)
+}
+
+func ParsePort(portString string) (uint16, error) {
+	if port, err := strconv.ParseUint(portString, 10, 16); err != nil {
+		logging.LogErrorf("parse port [%s] failed: %s", portString, err)
+		return 0, err
+	} else {
+		return uint16(port), nil
+	}
 }

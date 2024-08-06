@@ -20,17 +20,75 @@ import (
 	"bytes"
 	"io"
 	"io/fs"
+	"mime"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/88250/gulu"
 	"github.com/88250/lute/ast"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/logging"
 )
+
+func GetFilePathsByExts(dirPath string, exts []string) (ret []string) {
+	filelock.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if nil != err {
+			logging.LogErrorf("get file paths by ext failed: %s", err)
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		for _, ext := range exts {
+			if strings.HasSuffix(path, ext) {
+				ret = append(ret, path)
+				break
+			}
+		}
+		return nil
+	})
+	return
+}
+
+func GetUniqueFilename(filePath string) string {
+	if !gulu.File.IsExist(filePath) {
+		return filePath
+	}
+
+	ext := filepath.Ext(filePath)
+	base := strings.TrimSuffix(filepath.Base(filePath), ext)
+	dir := filepath.Dir(filePath)
+	i := 1
+	for {
+		newPath := filepath.Join(dir, base+" ("+strconv.Itoa(i)+")"+ext)
+		if !gulu.File.IsExist(newPath) {
+			return newPath
+		}
+		i++
+	}
+}
+
+func GetMimeTypeByExt(filePath string) (ret string) {
+	ret = mime.TypeByExtension(filepath.Ext(filePath))
+	if "" == ret {
+		m, err := mimetype.DetectFile(filePath)
+		if nil != err {
+			logging.LogErrorf("detect mime type of [%s] failed: %s", filePath, err)
+			return
+		}
+		if nil != m {
+			ret = m.String()
+		}
+	}
+	return
+}
 
 func IsSymlinkPath(absPath string) bool {
 	fi, err := os.Lstat(absPath)
@@ -184,6 +242,7 @@ func FilterFileName(name string) string {
 	name = strings.ReplaceAll(name, ">", "")
 	name = strings.ReplaceAll(name, "|", "")
 	name = strings.TrimSpace(name)
+	name = gulu.Str.RemoveInvisible(name) // Remove invisible characters from file names when uploading assets https://github.com/siyuan-note/siyuan/issues/11683
 	return name
 }
 

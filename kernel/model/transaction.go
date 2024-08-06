@@ -44,21 +44,10 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func IsFoldHeading(transactions *[]*Transaction) bool {
+func IsMoveOutlineHeading(transactions *[]*Transaction) bool {
 	for _, tx := range *transactions {
 		for _, op := range tx.DoOperations {
-			if "foldHeading" == op.Action {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func IsUnfoldHeading(transactions *[]*Transaction) bool {
-	for _, tx := range *transactions {
-		for _, op := range tx.DoOperations {
-			if "unfoldHeading" == op.Action {
+			if "moveOutlineHeading" == op.Action {
 				return true
 			}
 		}
@@ -83,13 +72,14 @@ func WaitForWritingFiles() {
 }
 
 var (
-	txQueue   = make(chan *Transaction, 7)
-	flushLock = sync.Mutex{}
+	txQueue    = make(chan *Transaction, 7)
+	flushLock  = sync.Mutex{}
+	isFlushing = false
 )
 
 func isWritingFiles() bool {
 	time.Sleep(time.Duration(50) * time.Millisecond)
-	return 0 < len(txQueue)
+	return 0 < len(txQueue) || isFlushing
 }
 
 func init() {
@@ -106,7 +96,11 @@ func init() {
 func flushTx(tx *Transaction) {
 	defer logging.Recover()
 	flushLock.Lock()
-	defer flushLock.Unlock()
+	isFlushing = true
+	defer func() {
+		isFlushing = false
+		flushLock.Unlock()
+	}()
 
 	start := time.Now()
 	if txErr := performTx(tx); nil != txErr {
@@ -176,7 +170,7 @@ func performTx(tx *Transaction) (ret *TxErr) {
 			msg := fmt.Sprintf("PANIC RECOVERED: %v\n\t%s\n", e, stack)
 			logging.LogErrorf(msg)
 
-			if 0 == tx.state.Load() {
+			if 1 == tx.state.Load() {
 				tx.rollback()
 				return
 			}
@@ -195,6 +189,8 @@ func performTx(tx *Transaction) (ret *TxErr) {
 			ret = tx.doDelete(op)
 		case "move":
 			ret = tx.doMove(op)
+		case "moveOutlineHeading":
+			ret = tx.doMoveOutlineHeading(op)
 		case "append":
 			ret = tx.doAppend(op)
 		case "appendInsert":
@@ -245,6 +241,8 @@ func performTx(tx *Transaction) (ret *TxErr) {
 			ret = tx.doSortAttrViewRow(op)
 		case "sortAttrViewCol":
 			ret = tx.doSortAttrViewColumn(op)
+		case "sortAttrViewKey":
+			ret = tx.doSortAttrViewKey(op)
 		case "updateAttrViewCell":
 			ret = tx.doUpdateAttrViewCell(op)
 		case "updateAttrViewColOptions":
@@ -277,6 +275,14 @@ func performTx(tx *Transaction) (ret *TxErr) {
 			ret = tx.doUpdateAttrViewColRelation(op)
 		case "updateAttrViewColRollup":
 			ret = tx.doUpdateAttrViewColRollup(op)
+		case "hideAttrViewName":
+			ret = tx.doHideAttrViewName(op)
+		case "setAttrViewColDate":
+			ret = tx.doSetAttrViewColDate(op)
+		case "unbindAttrViewBlock":
+			ret = tx.doUnbindAttrViewBlock(op)
+		case "duplicateAttrViewKey":
+			ret = tx.doDuplicateAttrViewKey(op)
 		}
 
 		if nil != ret {
@@ -313,8 +319,6 @@ func (tx *Transaction) doMove(operation *Operation) (ret *TxErr) {
 		// Blocks below other non-folded headings are no longer moved when moving a folded heading https://github.com/siyuan-note/siyuan/issues/8321
 		headingChildren = treenode.GetHeadingFold(headingChildren)
 	}
-
-	refreshHeadingChildrenUpdated(srcNode, time.Now().Format("20060102150405"))
 
 	var srcEmptyList *ast.Node
 	if ast.NodeListItem == srcNode.Type && srcNode.Parent.FirstChild == srcNode && srcNode.Parent.LastChild == srcNode {
@@ -367,8 +371,6 @@ func (tx *Transaction) doMove(operation *Operation) (ret *TxErr) {
 		if nil != srcEmptyList {
 			srcEmptyList.Unlink()
 		}
-
-		refreshHeadingChildrenUpdated(srcNode, time.Now().Format("20060102150405"))
 
 		refreshUpdated(srcNode)
 		refreshUpdated(srcTree.Root)
@@ -447,8 +449,6 @@ func (tx *Transaction) doMove(operation *Operation) (ret *TxErr) {
 			srcEmptyList.Unlink()
 		}
 	}
-
-	refreshHeadingChildrenUpdated(srcNode, time.Now().Format("20060102150405"))
 
 	refreshUpdated(srcNode)
 	refreshUpdated(srcTree.Root)
@@ -759,8 +759,6 @@ func (tx *Transaction) doDelete(operation *Operation) (ret *TxErr) {
 		node.Next.Unlink()
 	}
 
-	refreshHeadingChildrenUpdated(node, time.Now().Format("20060102150405"))
-
 	node.Unlink()
 	if nil != parent && ast.NodeListItem == parent.Type && nil == parent.FirstChild {
 		// 保持空列表项
@@ -775,54 +773,104 @@ func (tx *Transaction) doDelete(operation *Operation) (ret *TxErr) {
 	}
 
 	syncDelete2AttributeView(node)
-	removeAvBlockRel(node)
+	syncDelete2Block(node)
 	return
 }
 
-func removeAvBlockRel(node *ast.Node) {
+func syncDelete2Block(node *ast.Node) {
+	var changedAvIDs []string
 	ast.Walk(node, func(n *ast.Node, entering bool) ast.WalkStatus {
-		if !entering {
+		if !entering || ast.NodeAttributeView != n.Type {
 			return ast.WalkContinue
 		}
 
-		if ast.NodeAttributeView == n.Type {
-			avID := n.AttributeViewID
-			av.RemoveBlockRel(avID, n.ID)
+		avID := n.AttributeViewID
+		isMirror := av.IsMirror(avID)
+		if changed := av.RemoveBlockRel(avID, n.ID, treenode.ExistBlockTree); changed {
+			changedAvIDs = append(changedAvIDs, avID)
+		}
+
+		if isMirror {
+			// 删除镜像数据库节点后不需要解绑块，因为其他镜像节点还在使用
+			return ast.WalkContinue
+		}
+
+		attrView, err := av.ParseAttributeView(avID)
+		if nil != err {
+			return ast.WalkContinue
+		}
+
+		trees, nodes := getAttrViewBoundNodes(attrView)
+		for _, toChangNode := range nodes {
+			avs := toChangNode.IALAttr(av.NodeAttrNameAvs)
+			if "" != avs {
+				avIDs := strings.Split(avs, ",")
+				avIDs = gulu.Str.RemoveElem(avIDs, avID)
+				if 1 > len(avIDs) {
+					toChangNode.RemoveIALAttr(av.NodeAttrNameAvs)
+				} else {
+					toChangNode.SetIALAttr(av.NodeAttrNameAvs, strings.Join(avIDs, ","))
+				}
+			}
+			avNames := getAvNames(toChangNode.IALAttr(av.NodeAttrNameAvs))
+			oldAttrs := parse.IAL2Map(toChangNode.KramdownIAL)
+			toChangNode.SetIALAttr(av.NodeAttrViewNames, avNames)
+			pushBroadcastAttrTransactions(oldAttrs, toChangNode)
+		}
+		for _, tree := range trees {
+			indexWriteTreeUpsertQueue(tree)
 		}
 		return ast.WalkContinue
 	})
+	changedAvIDs = gulu.Str.RemoveDuplicatedElem(changedAvIDs)
+	for _, avID := range changedAvIDs {
+		util.PushReloadAttrView(avID)
+	}
 }
 
 func syncDelete2AttributeView(node *ast.Node) {
-	avs := node.IALAttr(av.NodeAttrNameAvs)
-	if "" == avs {
-		return
-	}
-
-	avIDs := strings.Split(avs, ",")
-	for _, avID := range avIDs {
-		attrView, parseErr := av.ParseAttributeView(avID)
-		if nil != parseErr {
-			continue
+	changedAvIDs := hashset.New()
+	ast.Walk(node, func(n *ast.Node, entering bool) ast.WalkStatus {
+		if !entering || !n.IsBlock() {
+			return ast.WalkContinue
 		}
 
-		changedAv := false
-		blockValues := attrView.GetBlockKeyValues()
-		if nil == blockValues {
-			continue
+		avs := n.IALAttr(av.NodeAttrNameAvs)
+		if "" == avs {
+			return ast.WalkContinue
 		}
 
-		for i, blockValue := range blockValues.Values {
-			if blockValue.Block.ID == node.ID {
-				blockValues.Values = append(blockValues.Values[:i], blockValues.Values[i+1:]...)
-				changedAv = true
-				break
+		avIDs := strings.Split(avs, ",")
+		for _, avID := range avIDs {
+			attrView, parseErr := av.ParseAttributeView(avID)
+			if nil != parseErr {
+				continue
+			}
+
+			changedAv := false
+			blockValues := attrView.GetBlockKeyValues()
+			if nil == blockValues {
+				continue
+			}
+
+			for i, blockValue := range blockValues.Values {
+				if blockValue.Block.ID == n.ID {
+					blockValues.Values = append(blockValues.Values[:i], blockValues.Values[i+1:]...)
+					changedAv = true
+					break
+				}
+			}
+
+			if changedAv {
+				av.SaveAttributeView(attrView)
+				changedAvIDs.Add(avID)
 			}
 		}
-		if changedAv {
-			av.SaveAttributeView(attrView)
-			util.BroadcastByType("protyle", "refreshAttributeView", 0, "", map[string]interface{}{"id": avID})
-		}
+		return ast.WalkContinue
+	})
+
+	for _, avID := range changedAvIDs.Values() {
+		util.PushReloadAttrView(avID.(string))
 	}
 }
 
@@ -970,8 +1018,6 @@ func (tx *Transaction) doInsert(operation *Operation) (ret *TxErr) {
 		}
 	}
 
-	refreshHeadingChildrenUpdated(insertedNode, time.Now().Format("20060102150405"))
-
 	createdUpdated(insertedNode)
 	tx.nodes[insertedNode.ID] = insertedNode
 	if err = tx.writeTree(tree); nil != err {
@@ -979,6 +1025,20 @@ func (tx *Transaction) doInsert(operation *Operation) (ret *TxErr) {
 	}
 
 	upsertAvBlockRel(insertedNode)
+
+	// 复制为副本时将该副本块插入到数据库中 https://github.com/siyuan-note/siyuan/issues/11959
+	avs := insertedNode.IALAttr(av.NodeAttrNameAvs)
+	for _, avID := range strings.Split(avs, ",") {
+		if !ast.IsNodeIDPattern(avID) {
+			continue
+		}
+
+		AddAttributeViewBlock(tx, []map[string]interface{}{{
+			"id":         insertedNode.ID,
+			"isDetached": false,
+		}}, avID, "", previousID, false)
+		util.PushReloadAttrView(avID)
+	}
 
 	operation.ID = insertedNode.ID
 	operation.ParentID = insertedNode.Parent.ID
@@ -991,11 +1051,6 @@ func (tx *Transaction) doUpdate(operation *Operation) (ret *TxErr) {
 	id := operation.ID
 	tree, err := tx.loadTree(id)
 	if nil != err {
-		if errors.Is(err, ErrBlockNotFound) {
-			logging.LogWarnf("not found block [%s]", id)
-			return
-		}
-
 		logging.LogErrorf("load tree [%s] failed: %s", id, err)
 		return &TxErr{code: TxErrCodeBlockNotFound, id: id}
 	}
@@ -1059,8 +1114,6 @@ func (tx *Transaction) doUpdate(operation *Operation) (ret *TxErr) {
 		treenode.MoveFoldHeading(updatedNode, oldNode)
 	}
 
-	refreshHeadingChildrenUpdated(oldNode, time.Now().Format("20060102150405"))
-
 	cache.PutBlockIAL(updatedNode.ID, parse.IAL2Map(updatedNode.KramdownIAL))
 
 	// 替换为新节点
@@ -1068,7 +1121,6 @@ func (tx *Transaction) doUpdate(operation *Operation) (ret *TxErr) {
 	oldNode.Unlink()
 
 	createdUpdated(updatedNode)
-	refreshHeadingChildrenUpdated(updatedNode, updatedNode.IALAttr("updated"))
 
 	tx.nodes[updatedNode.ID] = updatedNode
 	if err = tx.writeTree(tree); nil != err {
@@ -1081,20 +1133,8 @@ func (tx *Transaction) doUpdate(operation *Operation) (ret *TxErr) {
 	return
 }
 
-func refreshHeadingChildrenUpdated(heading *ast.Node, updated string) {
-	if nil == heading || ast.NodeHeading != heading.Type {
-		return
-	}
-
-	// 将非标题块更新为标题块时需要更新下方块的 parent id
-	// The parent block field of the blocks under the heading block is calculated incorrectly https://github.com/siyuan-note/siyuan/issues/9869
-	children := treenode.HeadingChildren(heading)
-	for _, child := range children {
-		child.SetIALAttr("updated", updated)
-	}
-}
-
 func upsertAvBlockRel(node *ast.Node) {
+	var avIDs []string
 	ast.Walk(node, func(n *ast.Node, entering bool) ast.WalkStatus {
 		if !entering {
 			return ast.WalkContinue
@@ -1102,10 +1142,16 @@ func upsertAvBlockRel(node *ast.Node) {
 
 		if ast.NodeAttributeView == n.Type {
 			avID := n.AttributeViewID
-			av.UpsertBlockRel(avID, n.ID)
+			if changed := av.UpsertBlockRel(avID, n.ID); changed {
+				avIDs = append(avIDs, avID)
+			}
 		}
 		return ast.WalkContinue
 	})
+	avIDs = gulu.Str.RemoveDuplicatedElem(avIDs)
+	for _, avID := range avIDs {
+		util.PushReloadAttrView(avID)
+	}
 }
 
 func (tx *Transaction) doUpdateUpdated(operation *Operation) (ret *TxErr) {
@@ -1195,24 +1241,39 @@ func (tx *Transaction) doSetAttrs(operation *Operation) (ret *TxErr) {
 func refreshUpdated(node *ast.Node) {
 	updated := util.CurrentTimeSecondsStr()
 	node.SetIALAttr("updated", updated)
-	parents := treenode.ParentNodes(node)
+	parents := treenode.ParentNodesWithHeadings(node)
 	for _, parent := range parents { // 更新所有父节点的更新时间字段
 		parent.SetIALAttr("updated", updated)
 	}
 }
 
 func createdUpdated(node *ast.Node) {
+	// 补全子节点的更新时间 Improve block update time filling https://github.com/siyuan-note/siyuan/issues/12182
+	ast.Walk(node, func(n *ast.Node, entering bool) ast.WalkStatus {
+		if !entering || !n.IsBlock() || ast.NodeKramdownBlockIAL == n.Type {
+			return ast.WalkContinue
+		}
+
+		updated := n.IALAttr("updated")
+		if "" == updated && ast.IsNodeIDPattern(n.ID) {
+			created := util.TimeFromID(n.ID)
+			n.SetIALAttr("updated", created)
+		}
+		return ast.WalkContinue
+	})
+
 	created := util.TimeFromID(node.ID)
 	updated := node.IALAttr("updated")
 	if "" == updated {
 		updated = created
 	}
 	if updated < created {
-		updated = created // 复制粘贴块后创建时间小于更新时间 https://github.com/siyuan-note/siyuan/issues/3624
+		updated = created
 	}
-	parents := treenode.ParentNodes(node)
+	parents := treenode.ParentNodesWithHeadings(node)
 	for _, parent := range parents { // 更新所有父节点的更新时间字段
 		parent.SetIALAttr("updated", updated)
+		cache.PutBlockIAL(parent.ID, parse.IAL2Map(parent.KramdownIAL))
 	}
 }
 
@@ -1225,19 +1286,22 @@ type Operation struct {
 	NextID     string      `json:"nextID"`
 	RetData    interface{} `json:"retData"`
 	BlockIDs   []string    `json:"blockIDs"`
+	BlockID    string      `json:"blockID"`
 
 	DeckID string `json:"deckID"` // 用于添加/删除闪卡
 
-	AvID              string   `json:"avID"`              // 属性视图 ID
-	SrcIDs            []string `json:"srcIDs"`            // 用于将块拖拽到属性视图中
-	IsDetached        bool     `json:"isDetached"`        // 用于标识是否是脱离块，仅存在于属性视图中
-	Name              string   `json:"name"`              // 属性视图列名
-	Typ               string   `json:"type"`              // 属性视图列类型
-	Format            string   `json:"format"`            // 属性视图列格式化
-	KeyID             string   `json:"keyID"`             // 属性视列 ID
-	RowID             string   `json:"rowID"`             // 属性视图行 ID
-	IsTwoWay          bool     `json:"isTwoWay"`          // 属性视图关联列是否是双向关系
-	BackRelationKeyID string   `json:"backRelationKeyID"` // 属性视图关联列回链关联列的 ID
+	AvID                string                   `json:"avID"`              // 属性视图 ID
+	SrcIDs              []string                 `json:"srcIDs"`            // 用于从属性视图中删除行
+	Srcs                []map[string]interface{} `json:"srcs"`              // 用于添加属性视图行（包括绑定块）{id, content, isDetached}
+	IsDetached          bool                     `json:"isDetached"`        // 用于标识是否未绑定块，仅存在于属性视图中
+	IgnoreFillFilterVal bool                     `json:"ignoreFillFilter"`  // 用于标识是否忽略填充筛选值
+	Name                string                   `json:"name"`              // 属性视图列名
+	Typ                 string                   `json:"type"`              // 属性视图列类型
+	Format              string                   `json:"format"`            // 属性视图列格式化
+	KeyID               string                   `json:"keyID"`             // 属性视列 ID
+	RowID               string                   `json:"rowID"`             // 属性视图行 ID
+	IsTwoWay            bool                     `json:"isTwoWay"`          // 属性视图关联列是否是双向关系
+	BackRelationKeyID   string                   `json:"backRelationKeyID"` // 属性视图关联列回链关联列的 ID
 }
 
 type Transaction struct {
@@ -1250,12 +1314,12 @@ type Transaction struct {
 
 	luteEngine *lute.Lute
 	m          *sync.Mutex
-	state      atomic.Int32 // 0: 未提交，1: 已提交，2: 已回滚
+	state      atomic.Int32 // 0: 初始化，1：未提交，:2: 已提交，3: 已回滚
 }
 
 func (tx *Transaction) WaitForCommit() {
 	for {
-		if 0 == tx.state.Load() {
+		if 1 == tx.state.Load() {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
@@ -1264,34 +1328,34 @@ func (tx *Transaction) WaitForCommit() {
 }
 
 func (tx *Transaction) begin() (err error) {
-	if nil != err {
-		return
-	}
 	tx.trees = map[string]*parse.Tree{}
 	tx.nodes = map[string]*ast.Node{}
 	tx.luteEngine = util.NewLute()
 	tx.m.Lock()
-	tx.state.Store(0)
+	tx.state.Store(1)
 	return
 }
 
 func (tx *Transaction) commit() (err error) {
 	for _, tree := range tx.trees {
-		if err = writeJSONQueue(tree); nil != err {
+		if err = writeTreeUpsertQueue(tree); nil != err {
 			return
 		}
+
+		var sources []interface{}
+		sources = append(sources, tx)
+		util.PushSaveDoc(tree.ID, "tx", sources)
 	}
 	refreshDynamicRefTexts(tx.nodes, tx.trees)
 	IncSync()
-	tx.trees = nil
-	tx.state.Store(1)
+	tx.state.Store(2)
 	tx.m.Unlock()
 	return
 }
 
 func (tx *Transaction) rollback() {
 	tx.trees, tx.nodes = nil, nil
-	tx.state.Store(2)
+	tx.state.Store(3)
 	tx.m.Unlock()
 	return
 }
@@ -1321,11 +1385,11 @@ func (tx *Transaction) loadTree(id string) (ret *parse.Tree, err error) {
 
 func (tx *Transaction) writeTree(tree *parse.Tree) (err error) {
 	tx.trees[tree.ID] = tree
-	treenode.IndexBlockTree(tree)
+	treenode.UpsertBlockTree(tree)
 	return
 }
 
-// refreshDynamicRefText 用于刷新引用块的动态锚文本。
+// refreshDynamicRefText 用于刷新块引用的动态锚文本。
 // 该实现依赖了数据库缓存，导致外部调用时可能需要阻塞等待数据库写入后才能获取到 refs
 func refreshDynamicRefText(updatedDefNode *ast.Node, updatedTree *parse.Tree) {
 	changedDefs := map[string]*ast.Node{updatedDefNode.ID: updatedDefNode}
@@ -1333,7 +1397,7 @@ func refreshDynamicRefText(updatedDefNode *ast.Node, updatedTree *parse.Tree) {
 	refreshDynamicRefTexts(changedDefs, changedTrees)
 }
 
-// refreshDynamicRefTexts 用于批量刷新引用块的动态锚文本。
+// refreshDynamicRefTexts 用于批量刷新块引用的动态锚文本。
 // 该实现依赖了数据库缓存，导致外部调用时可能需要阻塞等待数据库写入后才能获取到 refs
 func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees map[string]*parse.Tree) {
 	// 1. 更新引用的动态锚文本
@@ -1373,7 +1437,7 @@ func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees m
 		refTree, ok := updatedTrees[refTreeID]
 		if !ok {
 			var err error
-			refTree, err = loadTreeByBlockID(refTreeID)
+			refTree, err = LoadTreeByBlockID(refTreeID)
 			if nil != err {
 				continue
 			}
@@ -1432,14 +1496,14 @@ func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees m
 			}
 			if changedAv {
 				av.SaveAttributeView(attrView)
-				util.BroadcastByType("protyle", "refreshAttributeView", 0, "", map[string]interface{}{"id": avID})
+				util.PushReloadAttrView(avID)
 			}
 		}
 	}
 
 	// 3. 保存变更
 	for _, tree := range changedRefTree {
-		indexWriteJSONQueue(tree)
+		indexWriteTreeUpsertQueue(tree)
 	}
 }
 

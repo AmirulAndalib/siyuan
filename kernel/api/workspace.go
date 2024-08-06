@@ -235,6 +235,13 @@ func getWorkspaces(c *gin.Context) {
 		return
 	}
 
+	if role := model.GetGinContextRole(c); !model.IsValidRole(role, []model.Role{
+		model.RoleAdministrator,
+	}) {
+		ret.Data = []*Workspace{}
+		return
+	}
+
 	var workspaces, openedWorkspaces, closedWorkspaces []*Workspace
 	for _, p := range workspacePaths {
 		closed := !util.IsWorkspaceLocked(p)
@@ -311,8 +318,9 @@ func setWorkspaceDir(c *gin.Context) {
 
 	if util.ContainerAndroid == util.Container || util.ContainerIOS == util.Container {
 		util.PushMsg(model.Conf.Language(42), 1000*15)
-		time.Sleep(time.Second * 2)
-		model.Close(false, 1)
+		time.Sleep(time.Second * 1)
+		model.Close(false, false, 1)
+		time.Sleep(time.Second * 1)
 	}
 }
 

@@ -7,12 +7,17 @@ import {hasClosestBlock, hasClosestByClassName} from "../../util/hasClosest";
 import {unicode2Emoji} from "../../../emoji";
 import {transaction} from "../../wysiwyg/transaction";
 import {openMenuPanel} from "./openMenuPanel";
+import {uploadFiles} from "../../upload";
 
 const genAVRollupHTML = (value: IAVCellValue) => {
     let html = "";
     switch (value.type) {
         case "block":
-            html = value.block.content;
+            if (value?.isDetached) {
+                html = `<span data-id="${value.block?.id}">${value.block?.content || window.siyuan.languages.untitled}</span>`;
+            } else {
+                html = `<span data-type="block-ref" data-id="${value.block?.id}" data-subtype="s" class="av__celltext--ref">${value.block?.content || window.siyuan.languages.untitled}</span>`;
+            }
             break;
         case "text":
             html = value.text.content;
@@ -51,10 +56,10 @@ export const genAVValueHTML = (value: IAVCellValue) => {
             html = `<div class="fn__flex-1">${value.block.content}</div>`;
             break;
         case "text":
-            html = `<textarea rows="${value.text.content.split("\n").length}" class="b3-text-field b3-text-field--text fn__flex-1">${value.text.content}</textarea>`;
+            html = `<textarea style="resize: vertical" rows="${value.text.content.split("\n").length}" class="b3-text-field b3-text-field--text fn__flex-1">${value.text.content}</textarea>`;
             break;
         case "number":
-            html = `<input value="${value.number.content}" type="number" class="b3-text-field b3-text-field--text fn__flex-1">`;
+            html = `<input value="${value.number.content || ""}" type="number" class="b3-text-field b3-text-field--text fn__flex-1">`;
             break;
         case "mSelect":
         case "select":
@@ -98,7 +103,7 @@ export const genAVValueHTML = (value: IAVCellValue) => {
 <a href="tel:${value.phone.content}" target="_blank" aria-label="${window.siyuan.languages.openBy}" class="block__icon block__icon--show fn__flex-center b3-tooltips__w b3-tooltips"><svg><use xlink:href="#iconPhone"></use></svg></a>`;
             break;
         case "checkbox":
-            html = `<svg class="av__checkbox" style="height: 17px;"><use xlink:href="#icon${value.checkbox.checked ? "Check" : "Uncheck"}"></use></svg>`;
+            html = `<svg class="av__checkbox"><use xlink:href="#icon${value.checkbox.checked ? "Check" : "Uncheck"}"></use></svg>`;
             break;
         case "template":
             html = `<div class="fn__flex-1">${value.template.content}</div>`;
@@ -109,19 +114,27 @@ export const genAVValueHTML = (value: IAVCellValue) => {
 <a href="mailto:${value.email.content}" target="_blank" aria-label="${window.siyuan.languages.openBy}" class="block__icon block__icon--show fn__flex-center b3-tooltips__w b3-tooltips"><svg><use xlink:href="#iconEmail"></use></svg></a>`;
             break;
         case "relation":
-            value.relation?.blockIDs?.forEach((item, index) => {
-                html += `<span class="av__celltext--url" style="margin-right: 8px" data-id="${item}">${value.relation?.contents[index] || "Untitled"}</span>`;
+            value?.relation?.contents?.forEach((item) => {
+                if (item) {
+                    const rollupText = genAVRollupHTML(item);
+                    if (rollupText) {
+                        html += rollupText + ",&nbsp;";
+                    }
+                }
             });
+            if (html && html.endsWith(",&nbsp;")) {
+                html = html.substring(0, html.length - 7);
+            }
             break;
         case "rollup":
             value?.rollup?.contents?.forEach((item) => {
                 const rollupText = ["select", "mSelect", "mAsset", "checkbox", "relation"].includes(item.type) ? genAVValueHTML(item) : genAVRollupHTML(item);
                 if (rollupText) {
-                    html += rollupText + ", ";
+                    html += rollupText + ",&nbsp;";
                 }
             });
-            if (html && html.endsWith(", ")) {
-                html = html.substring(0, html.length - 2);
+            if (html && html.endsWith(",&nbsp;")) {
+                html = html.substring(0, html.length - 7);
             }
             break;
     }
@@ -154,16 +167,15 @@ export const renderAVAttribute = (element: HTMLElement, id: string, protyle: IPr
             avID: string
             avName: string
         }) => {
-            html += `<div data-av-id="${table.avID}" data-node-id="${id}" data-type="NodeAttributeView">
-<div class="custom-attr__avheader block__logo popover__block" data-id='${JSON.stringify(table.blockIDs)}'>
+            let innerHTML = `<div class="custom-attr__avheader block__logo popover__block" data-id='${JSON.stringify(table.blockIDs)}'>
     <div class="fn__flex-1"></div>
     <svg class="block__logoicon"><use xlink:href="#iconDatabase"></use></svg><span>${table.avName || window.siyuan.languages.database}</span>
     <div class="fn__flex-1"></div>
 </div>`;
             table.keyValues?.forEach(item => {
-                html += `<div class="block__icons av__row" data-id="${id}" data-col-id="${item.key.id}">
+                innerHTML += `<div class="block__icons av__row" data-id="${id}" data-col-id="${item.key.id}">
     <div class="block__icon" draggable="true"><svg><use xlink:href="#iconDrag"></use></svg></div>
-    <div class="block__logo ariaLabel${item.values[0].type === "block" ? "" : " fn__pointer"}" data-type="editCol" data-position="parentW" aria-label="${escapeAttr(item.key.name)}"">
+    <div class="block__logo ariaLabel fn__pointer" data-type="editCol" data-position="parentW" aria-label="${escapeAttr(item.key.name)}">
         ${item.key.icon ? unicode2Emoji(item.key.icon, "block__logoicon", true) : `<svg class="block__logoicon"><use xlink:href="#${getColIconByType(item.key.type)}"></use></svg>`}
         <span>${item.key.name}</span>
     </div>
@@ -174,11 +186,17 @@ class="fn__flex-1 fn__flex${["url", "text", "number", "email", "phone", "block"]
     </div>
 </div>`;
             });
-            html += `<div class="fn__hr"></div>
+            innerHTML += `<div class="fn__hr"></div>
 <div class="fn__flex">
     <div class="fn__space"></div><div class="fn__space"></div>
     <button data-type="addColumn" class="b3-button b3-button--outline"><svg><use xlink:href="#iconAdd"></use></svg>${window.siyuan.languages.addAttr}</button>
-</div></div>`;
+</div><div class="fn__hr--b"></div>`;
+            html += `<div data-av-id="${table.avID}" data-node-id="${id}" data-type="NodeAttributeView">${innerHTML}</div>`;
+
+            if (element.innerHTML) {
+                // 防止 blockElement 找不到
+                element.querySelector(`div[data-node-id="${id}"][data-av-id="${table.avID}"]`).innerHTML = innerHTML;
+            }
         });
         if (element.innerHTML === "") {
             let dragBlockElement: HTMLElement;
@@ -203,21 +221,25 @@ class="fn__flex-1 fn__flex${["url", "text", "number", "email", "phone", "block"]
                 const targetElement = element.querySelector(".dragover__bottom, .dragover__top") as HTMLElement;
                 if (targetElement && dragBlockElement) {
                     const isBottom = targetElement.classList.contains("dragover__bottom");
-                    transaction(protyle, [{
-                        action: "sortAttrViewCol",
-                        avID: dragBlockElement.dataset.avId,
-                        previousID: isBottom ? targetElement.dataset.colId : targetElement.previousElementSibling?.getAttribute("data-col-id"),
-                        id: window.siyuan.dragElement.dataset.colId,
-                    }, {
-                        action: "sortAttrViewCol",
-                        avID: dragBlockElement.dataset.avId,
-                        previousID: window.siyuan.dragElement.previousElementSibling?.getAttribute("data-col-id"),
-                        id
-                    }]);
-                    if (isBottom) {
-                        targetElement.after(window.siyuan.dragElement);
-                    } else {
-                        targetElement.before(window.siyuan.dragElement);
+                    const previousID = isBottom ? targetElement.dataset.colId : targetElement.previousElementSibling?.getAttribute("data-col-id");
+                    const undoPreviousID = window.siyuan.dragElement.previousElementSibling?.getAttribute("data-col-id");
+                    if (previousID !== undoPreviousID && previousID !== window.siyuan.dragElement.dataset.colId) {
+                        transaction(protyle, [{
+                            action: "sortAttrViewKey",
+                            avID: dragBlockElement.dataset.avId,
+                            previousID,
+                            id: window.siyuan.dragElement.dataset.colId,
+                        }], [{
+                            action: "sortAttrViewKey",
+                            avID: dragBlockElement.dataset.avId,
+                            previousID: undoPreviousID,
+                            id,
+                        }]);
+                        if (isBottom) {
+                            targetElement.after(window.siyuan.dragElement);
+                        } else {
+                            targetElement.before(window.siyuan.dragElement);
+                        }
                     }
                     targetElement.classList.remove("dragover__bottom", "dragover__top");
                 }
@@ -256,79 +278,20 @@ class="fn__flex-1 fn__flex${["url", "text", "number", "email", "phone", "block"]
                     window.siyuan.dragElement = undefined;
                 }
             });
-            element.addEventListener("click", (event) => {
-                let target = event.target as HTMLElement;
-                const blockElement = hasClosestBlock(target);
-                if (!blockElement) {
-                    return;
-                }
-                while (target && !element.isSameNode(target)) {
-                    const type = target.getAttribute("data-type");
-                    if (type === "date") {
-                        popTextCell(protyle, [target], "date");
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "select" || type === "mSelect") {
-                        popTextCell(protyle, [target], target.getAttribute("data-type") as TAVCol);
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "mAsset") {
-                        popTextCell(protyle, [target], "mAsset");
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "checkbox") {
-                        popTextCell(protyle, [target], "checkbox");
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "relation") {
-                        popTextCell(protyle, [target], "relation");
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "template") {
-                        popTextCell(protyle, [target], "template");
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "rollup") {
-                        popTextCell(protyle, [target], "rollup");
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "addColumn") {
-                        const rowElements = blockElement.querySelectorAll(".av__row");
-                        const addMenu = addCol(protyle, blockElement, rowElements[rowElements.length - 1].getAttribute("data-col-id"));
-                        const addRect = target.getBoundingClientRect();
-                        addMenu.open({
-                            x: addRect.left,
-                            y: addRect.bottom,
-                            h: addRect.height
-                        });
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    } else if (type === "editCol") {
-                        if (target.classList.contains("fn__pointer")) {
-                            openMenuPanel({
-                                protyle,
-                                blockElement,
-                                type: "edit",
-                                colId: target.parentElement.dataset.colId
-                            });
-                        }
-                        event.stopPropagation();
-                        event.preventDefault();
-                        break;
-                    }
-                    target = target.parentElement;
+            element.addEventListener("paste", (event) => {
+                const files = event.clipboardData.files;
+                if (document.querySelector(".av__panel .b3-form__upload") && files && files.length > 0) {
+                    uploadFiles(protyle, files);
                 }
             });
+            element.addEventListener("click", (event) => {
+                openEdit(protyle, element, event);
+            });
+            element.addEventListener("contextmenu", (event) => {
+                openEdit(protyle, element, event);
+            });
+            element.innerHTML = html;
         }
-        element.innerHTML = html;
         element.querySelectorAll(".b3-text-field--text").forEach((item: HTMLInputElement) => {
             item.addEventListener("change", () => {
                 let value;
@@ -339,11 +302,21 @@ class="fn__flex-1 fn__flex${["url", "text", "number", "email", "phone", "block"]
                         }
                     };
                 } else if (item.parentElement.dataset.type === "number") {
-                    value = {
-                        number: {
-                            content: parseFloat(item.value)
-                        }
-                    };
+                    if ("undefined" === item.value || !item.value) {
+                        value = {
+                            number: {
+                                content: null,
+                                isNotEmpty: false
+                            }
+                        };
+                    } else {
+                        value = {
+                            number: {
+                                content: parseFloat(item.value) || 0,
+                                isNotEmpty: true
+                            }
+                        };
+                    }
                 }
                 fetchPost("/api/av/setAttributeViewBlockAttr", {
                     avID: item.parentElement.dataset.avId,
@@ -358,4 +331,79 @@ class="fn__flex-1 fn__flex${["url", "text", "number", "email", "phone", "block"]
             cb(element);
         }
     });
+};
+
+const openEdit = (protyle: IProtyle, element:HTMLElement, event: MouseEvent) => {
+    let target = event.target as HTMLElement;
+    const blockElement = hasClosestBlock(target);
+    if (!blockElement) {
+        return;
+    }
+    while (target && !element.isSameNode(target)) {
+        const type = target.getAttribute("data-type");
+        if (type === "date") {
+            popTextCell(protyle, [target], "date");
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "select" || type === "mSelect") {
+            popTextCell(protyle, [target], target.getAttribute("data-type") as TAVCol);
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "mAsset") {
+            element.querySelectorAll('.custom-attr__avvalue[data-type="mAsset"]').forEach(item => {
+                item.removeAttribute("data-active");
+            });
+            target.setAttribute("data-active", "true");
+            target.focus();
+            popTextCell(protyle, [target], "mAsset");
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "checkbox") {
+            popTextCell(protyle, [target], "checkbox");
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "relation") {
+            popTextCell(protyle, [target], "relation");
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "template") {
+            popTextCell(protyle, [target], "template");
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "rollup") {
+            popTextCell(protyle, [target], "rollup");
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "addColumn") {
+            const rowElements = blockElement.querySelectorAll(".av__row");
+            const addMenu = addCol(protyle, blockElement, rowElements[rowElements.length - 1].getAttribute("data-col-id"));
+            const addRect = target.getBoundingClientRect();
+            addMenu.open({
+                x: addRect.left,
+                y: addRect.bottom,
+                h: addRect.height
+            });
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        } else if (type === "editCol") {
+            openMenuPanel({
+                protyle,
+                blockElement,
+                type: "edit",
+                colId: target.parentElement.dataset.colId
+            });
+            event.stopPropagation();
+            event.preventDefault();
+            break;
+        }
+        target = target.parentElement;
+    }
 };

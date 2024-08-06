@@ -182,7 +182,7 @@ func GetChildDocDepth(treeAbsPath string) (ret int) {
 func NormalizeTimeout(timeout int) int {
 	if 7 > timeout {
 		if 1 > timeout {
-			return 30
+			return 60
 		}
 		return 7
 	}
@@ -269,6 +269,7 @@ func IsDisplayableAsset(p string) bool {
 
 func GetAbsPathInWorkspace(relPath string) (string, error) {
 	absPath := filepath.Join(WorkspaceDir, relPath)
+	absPath = filepath.Clean(absPath)
 	if WorkspaceDir == absPath {
 		return absPath, nil
 	}

@@ -17,13 +17,14 @@
 package api
 
 import (
-	"github.com/88250/lute"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/88250/lute"
 
 	"github.com/88250/gulu"
 	"github.com/gin-gonic/gin"
@@ -116,6 +117,7 @@ func getEmojiConf(c *gin.Context) {
 		"id":          "custom",
 		"title":       "Custom",
 		"title_zh_cn": "自定义",
+		"title_ja_jp": "カスタム",
 	}
 	items := []map[string]interface{}{}
 	custom["items"] = items
@@ -172,6 +174,7 @@ func addCustomEmoji(name string, items *[]map[string]interface{}) {
 		"unicode":           name,
 		"description":       nameWithoutExt,
 		"description_zh_cn": nameWithoutExt,
+		"description_ja_jp": nameWithoutExt,
 		"keywords":          nameWithoutExt,
 	}
 	*items = append(*items, emoji)
@@ -216,6 +219,17 @@ func getConf(c *gin.Context) {
 
 	if !maskedConf.Sync.Enabled || (0 == maskedConf.Sync.Provider && !model.IsSubscriber()) {
 		maskedConf.Sync.Stat = model.Conf.Language(53)
+	}
+
+	// REF: https://github.com/siyuan-note/siyuan/issues/11364
+	role := model.GetGinContextRole(c)
+	if model.IsReadOnlyRole(role) {
+		maskedConf.ReadOnly = true
+	}
+	if !model.IsValidRole(role, []model.Role{
+		model.RoleAdministrator,
+	}) {
+		model.HideConfSecret(maskedConf)
 	}
 
 	ret.Data = map[string]interface{}{
@@ -421,8 +435,8 @@ func setAutoLaunch(c *gin.Context) {
 		return
 	}
 
-	autoLaunch := arg["autoLaunch"].(bool)
-	model.Conf.System.AutoLaunch = autoLaunch
+	autoLaunch := int(arg["autoLaunch"].(float64))
+	model.Conf.System.AutoLaunch2 = autoLaunch
 	model.Conf.Save()
 }
 
@@ -490,7 +504,7 @@ func exit(c *gin.Context) {
 		execInstallPkg = int(execInstallPkgArg.(float64))
 	}
 
-	exitCode := model.Close(force, execInstallPkg)
+	exitCode := model.Close(force, true, execInstallPkg)
 	ret.Code = exitCode
 	switch exitCode {
 	case 0:

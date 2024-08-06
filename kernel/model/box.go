@@ -28,14 +28,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/88250/go-humanize"
 	"github.com/88250/gulu"
 	"github.com/88250/lute/ast"
 	"github.com/88250/lute/html"
 	"github.com/88250/lute/parse"
-	"github.com/dustin/go-humanize"
 	"github.com/facette/natsort"
 	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/logging"
+	"github.com/siyuan-note/siyuan/kernel/cache"
 	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/sql"
@@ -73,7 +74,7 @@ func StatJob() {
 	Conf.m.Unlock()
 	Conf.Save()
 
-	logging.LogInfof("auto stat [trees=%d, blocks=%d, dataSize=%s, assetsSize=%s]", Conf.Stat.TreeCount, Conf.Stat.BlockCount, humanize.Bytes(uint64(Conf.Stat.DataSize)), humanize.Bytes(uint64(Conf.Stat.AssetsSize)))
+	logging.LogInfof("auto stat [trees=%d, blocks=%d, dataSize=%s, assetsSize=%s]", Conf.Stat.TreeCount, Conf.Stat.BlockCount, humanize.BytesCustomCeil(uint64(Conf.Stat.DataSize), 2), humanize.BytesCustomCeil(uint64(Conf.Stat.AssetsSize), 2))
 
 	// 桌面端检查磁盘可用空间 https://github.com/siyuan-note/siyuan/issues/6873
 	if util.ContainerStd != util.Container {
@@ -120,7 +121,7 @@ func ListNotebooks() (ret []*Box, err error) {
 			}
 			if readErr = gulu.JSON.UnmarshalJSON(data, boxConf); nil != readErr {
 				logging.LogErrorf("parse box conf [%s] failed: %s", boxConfPath, readErr)
-				os.RemoveAll(boxConfPath)
+				filelock.Remove(boxConfPath)
 				continue
 			}
 		}
@@ -393,7 +394,9 @@ func moveTree(tree *parse.Tree) {
 		tree.Root.RemoveIALAttr("custom-hidden")
 		filesys.WriteTree(tree)
 	}
-	sql.UpsertTreeQueue(tree)
+
+	sql.RemoveTreeQueue(tree.ID)
+	sql.IndexTreeQueue(tree)
 
 	box := Conf.Box(tree.Box)
 	box.renameSubTrees(tree)
@@ -401,12 +404,9 @@ func moveTree(tree *parse.Tree) {
 
 func (box *Box) renameSubTrees(tree *parse.Tree) {
 	subFiles := box.ListFiles(tree.Path)
-	box.moveTrees0(subFiles)
-}
 
-func (box *Box) moveTrees0(files []*FileInfo) {
 	luteEngine := util.NewLute()
-	for _, subFile := range files {
+	for _, subFile := range subFiles {
 		if !strings.HasSuffix(subFile.path, ".sy") {
 			continue
 		}
@@ -426,11 +426,11 @@ func (box *Box) moveTrees0(files []*FileInfo) {
 func parseKTree(kramdown []byte) (ret *parse.Tree) {
 	luteEngine := NewLute()
 	ret = parse.Parse("", kramdown, luteEngine.ParseOptions)
-	genTreeID(ret)
+	normalizeTree(ret)
 	return
 }
 
-func genTreeID(tree *parse.Tree) {
+func normalizeTree(tree *parse.Tree) {
 	if nil == tree.Root.FirstChild {
 		tree.Root.AppendChild(treenode.NewParagraph())
 	}
@@ -456,7 +456,7 @@ func genTreeID(tree *parse.Tree) {
 
 		if "" == n.IALAttr("id") && (ast.NodeParagraph == n.Type || ast.NodeList == n.Type || ast.NodeListItem == n.Type || ast.NodeBlockquote == n.Type ||
 			ast.NodeMathBlock == n.Type || ast.NodeCodeBlock == n.Type || ast.NodeHeading == n.Type || ast.NodeTable == n.Type || ast.NodeThematicBreak == n.Type ||
-			ast.NodeYamlFrontMatter == n.Type || ast.NodeBlockQueryEmbed == n.Type || ast.NodeSuperBlock == n.Type ||
+			ast.NodeYamlFrontMatter == n.Type || ast.NodeBlockQueryEmbed == n.Type || ast.NodeSuperBlock == n.Type || ast.NodeAttributeView == n.Type ||
 			ast.NodeHTMLBlock == n.Type || ast.NodeIFrame == n.Type || ast.NodeWidget == n.Type || ast.NodeAudio == n.Type || ast.NodeVideo == n.Type) {
 			n.ID = ast.NewNodeID()
 			n.KramdownIAL = [][]string{{"id", n.ID}}
@@ -491,6 +491,11 @@ func genTreeID(tree *parse.Tree) {
 			n.InsertBefore(n.FirstChild)
 		}
 
+		if ast.NodeLinkTitle == n.Type {
+			// 避免重复转义图片标题内容 Repeat the escaped content of the image title https://github.com/siyuan-note/siyuan/issues/11681
+			n.Tokens = html.UnescapeBytes(n.Tokens)
+		}
+
 		return ast.WalkContinue
 	})
 	tree.Root.KramdownIAL = parse.Tokens2IAL(tree.Root.LastChild.Tokens)
@@ -500,24 +505,32 @@ func genTreeID(tree *parse.Tree) {
 func FullReindex() {
 	task.AppendTask(task.DatabaseIndexFull, fullReindex)
 	task.AppendTask(task.DatabaseIndexRef, IndexRefs)
+	go func() {
+		sql.WaitForWritingDatabase()
+		ResetVirtualBlockRefCache()
+	}()
+	task.AppendTaskWithTimeout(task.DatabaseIndexEmbedBlock, 30*time.Second, autoIndexEmbedBlock)
+	cache.ClearDocsIAL()
+	cache.ClearBlocksIAL()
 	task.AppendTask(task.ReloadUI, util.ReloadUI)
 }
 
 func fullReindex() {
-	util.PushMsg(Conf.Language(35), 7*1000)
+	util.PushEndlessProgress(Conf.language(35))
+	defer util.PushClearProgress()
+
 	WaitForWritingFiles()
 
 	if err := sql.InitDatabase(true); nil != err {
 		os.Exit(logging.ExitCodeReadOnlyDatabase)
 		return
 	}
-	treenode.InitBlockTree(true)
 
+	sql.IndexIgnoreCached = false
 	openedBoxes := Conf.GetOpenedBoxes()
 	for _, openedBox := range openedBoxes {
 		index(openedBox.ID)
 	}
-	treenode.SaveBlockTree(true)
 	LoadFlashcards()
 	debug.FreeOSMemory()
 }
@@ -544,11 +557,16 @@ func (box *Box) UpdateHistoryGenerated() {
 
 func getBoxesByPaths(paths []string) (ret map[string]*Box) {
 	ret = map[string]*Box{}
+	var ids []string
 	for _, p := range paths {
-		id := strings.TrimSuffix(path.Base(p), ".sy")
-		bt := treenode.GetBlockTree(id)
+		ids = append(ids, strings.TrimSuffix(path.Base(p), ".sy"))
+	}
+
+	bts := treenode.GetBlockTrees(ids)
+	for _, id := range ids {
+		bt := bts[id]
 		if nil != bt {
-			ret[p] = Conf.Box(bt.BoxID)
+			ret[bt.Path] = Conf.Box(bt.BoxID)
 		}
 	}
 	return

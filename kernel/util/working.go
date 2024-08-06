@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"mime"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,7 +44,7 @@ import (
 var Mode = "prod"
 
 const (
-	Ver       = "2.12.5"
+	Ver       = "3.1.3"
 	IsInsider = false
 )
 
@@ -79,7 +80,7 @@ func Boot() {
 	readOnly := flag.String("readonly", "false", "read-only mode")
 	accessAuthCode := flag.String("accessAuthCode", "", "access auth code")
 	ssl := flag.Bool("ssl", false, "for https and wss")
-	lang := flag.String("lang", "", "zh_CN/zh_CHT/en_US/fr_FR/es_ES")
+	lang := flag.String("lang", "", "zh_CN/zh_CHT/en_US/fr_FR/es_ES/ja_JP")
 	mode := flag.String("mode", "prod", "dev/prod")
 	flag.Parse()
 
@@ -208,7 +209,7 @@ var (
 	DBPath             string        // SQLite 数据库文件路径
 	HistoryDBPath      string        // SQLite 历史数据库文件路径
 	AssetContentDBPath string        // SQLite 资源文件内容数据库文件路径
-	BlockTreePath      string        // 区块树文件路径
+	BlockTreeDBPath    string        // 区块树数据库文件路径
 	AppearancePath     string        // 配置目录下的外观目录 appearance/ 路径
 	ThemesPath         string        // 配置目录下的外观目录下的 themes/ 路径
 	IconsPath          string        // 配置目录下的外观目录下的 icons/ 路径
@@ -243,7 +244,6 @@ func initWorkspaceDir(workspaceArg string) {
 	} else {
 		workspacePaths, _ = ReadWorkspacePaths()
 		if 0 < len(workspacePaths) {
-			// 取最后一个（也就是最近打开的）工作空间
 			WorkspaceDir = workspacePaths[len(workspacePaths)-1]
 		} else {
 			WorkspaceDir = defaultWorkspaceDir
@@ -287,7 +287,7 @@ func initWorkspaceDir(workspaceArg string) {
 	DBPath = filepath.Join(TempDir, DBName)
 	HistoryDBPath = filepath.Join(TempDir, "history.db")
 	AssetContentDBPath = filepath.Join(TempDir, "asset_content.db")
-	BlockTreePath = filepath.Join(TempDir, "blocktree")
+	BlockTreeDBPath = filepath.Join(TempDir, "blocktree.db")
 	SnippetsPath = filepath.Join(DataDir, "snippets")
 }
 
@@ -342,7 +342,9 @@ func WriteWorkspacePaths(workspacePaths []string) (err error) {
 }
 
 var (
-	ServerPort     = "0" // HTTP/WebSocket 端口，0 为使用随机端口
+	ServerURL  *url.URL // 内核服务 URL
+	ServerPort = "0"    // HTTP/WebSocket 端口，0 为使用随机端口
+
 	ReadOnly       bool
 	AccessAuthCode string
 	Lang           = ""

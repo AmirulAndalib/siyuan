@@ -6,13 +6,10 @@ import {reloadProtyle} from "../protyle/util/reload";
 import {updateHotkeyTip} from "../protyle/util/compatibility";
 import {Constants} from "../constants";
 import {resize} from "../protyle/util/resize";
+import {setReadOnly} from "./util/setReadOnly";
 
 export const editor = {
     element: undefined as Element,
-    setReadonly: (readOnly: boolean) => {
-        window.siyuan.config.editor.readOnly = readOnly;
-        fetchPost("/api/setting/setEditor", window.siyuan.config.editor);
-    },
     genHTML: () => {
         let fontFamilyHTML = "";
         fontFamilyHTML = '<select id="fontFamily" class="b3-select fn__flex-center fn__size200"></select>';
@@ -75,19 +72,19 @@ export const editor = {
 </label>
 <label class="fn__flex b3-label">
     <div class="fn__flex-1">
-        ${window.siyuan.languages.floatWindowMode}
-        <div class="b3-label__text">${window.siyuan.languages.floatWindowModeTip.replace("${hotkey}", updateHotkeyTip("⌘"))}</div>
-    </div>
-    <span class="fn__space"></span>
-    <input class="b3-switch fn__flex-center" id="floatWindowMode" type="checkbox"${window.siyuan.config.editor.floatWindowMode === 0 ? " checked" : ""}/>
-</label>
-<label class="fn__flex b3-label">
-    <div class="fn__flex-1">
         ${window.siyuan.languages.outlineOutdent}
         <div class="b3-label__text">${window.siyuan.languages.outlineOutdentTip}</div>
     </div>
     <span class="fn__space"></span>
     <input class="b3-switch fn__flex-center" id="listLogicalOutdent" type="checkbox"${window.siyuan.config.editor.listLogicalOutdent ? " checked" : ""}/>
+</label>
+<label class="fn__flex b3-label">
+    <div class="fn__flex-1">
+        ${window.siyuan.languages.listItemDotNumberClickFocus}
+        <div class="b3-label__text">${window.siyuan.languages.listItemDotNumberClickFocusTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <input class="b3-switch fn__flex-center" id="listItemDotNumberClickFocus" type="checkbox"${window.siyuan.config.editor.listItemDotNumberClickFocus ? " checked" : ""}/>
 </label>
 <label class="fn__flex b3-label">
     <div class="fn__flex-1">
@@ -192,7 +189,7 @@ export const editor = {
         <div class="b3-label__text">${window.siyuan.languages.backmentionExpandTip}</div>
     </div>
     <span class="fn__space"></span>
-    <input class="b3-text-field fn__flex-center fn__size200" id="backmentionExpandCount" type="number" min="0" max="512" value="${window.siyuan.config.editor.backmentionExpandCount}"/>
+    <input class="b3-text-field fn__flex-center fn__size200" id="backmentionExpandCount" type="number" min="-1" max="512" value="${window.siyuan.config.editor.backmentionExpandCount}"/>
 </div>
 <div class="fn__flex b3-label config__item">
     <div class="fn__flex-1">
@@ -210,6 +207,18 @@ export const editor = {
     </div>
     <span class="fn__space"></span>
     <input class="b3-text-field fn__flex-center fn__size200" id="historyRetentionDays" type="number" min="0" value="${window.siyuan.config.editor.historyRetentionDays}"/>
+</div>
+<div class="fn__flex b3-label config__item">
+    <div class="fn__flex-1">
+        ${window.siyuan.languages.floatWindowMode}
+        <div class="b3-label__text">${window.siyuan.languages.floatWindowModeTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <select class="b3-select fn__flex-center fn__size200" id="floatWindowMode">
+      <option value="0" ${window.siyuan.config.editor.floatWindowMode === 0 ? "selected" : ""}>${window.siyuan.languages.floatWindowMode0}</option>
+      <option value="1" ${window.siyuan.config.editor.floatWindowMode === 1 ? "selected" : ""}>${window.siyuan.languages.floatWindowMode1.replace("${hotkey}", updateHotkeyTip("⌘"))}</option>
+      <option value="2" ${window.siyuan.config.editor.floatWindowMode === 2 ? "selected" : ""}>${window.siyuan.languages.floatWindowMode2}</option>
+    </select>    
 </div>
 <div class="fn__flex b3-label config__item">
     <div class="fn__flex-1">
@@ -254,7 +263,47 @@ export const editor = {
         <div class="fn__hr"></div>
         <textarea class="b3-text-field fn__block" id="katexMacros" spellcheck="false">${window.siyuan.config.editor.katexMacros}</textarea>
     </div>
-</div>`;
+</div>
+<label class="fn__flex b3-label">
+    <div class="fn__flex-1">
+        ${window.siyuan.languages.allowHTMLBLockScript}
+        <div class="b3-label__text">${window.siyuan.languages.allowHTMLBLockScriptTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <input class="b3-switch fn__flex-center" id="allowHTMLBLockScript" type="checkbox"${window.siyuan.config.editor.allowHTMLBLockScript ? " checked" : ""}/>
+</label>
+<label class="fn__flex b3-label">
+    <div class="fn__flex-1">
+        ${window.siyuan.languages.editorMarkdownInlineSup}
+        <div class="b3-label__text">${window.siyuan.languages.editorMarkdownInlineSupTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <input class="b3-switch fn__flex-center" id="editorMarkdownInlineSup" type="checkbox"${window.siyuan.config.editor.markdown.inlineSup ? " checked" : ""}/>
+</label>
+<label class="fn__flex b3-label">
+    <div class="fn__flex-1">
+        ${window.siyuan.languages.editorMarkdownInlineSub}
+        <div class="b3-label__text">${window.siyuan.languages.editorMarkdownInlineSubTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <input class="b3-switch fn__flex-center" id="editorMarkdownInlineSub" type="checkbox"${window.siyuan.config.editor.markdown.inlineSub ? " checked" : ""}/>
+</label>
+<label class="fn__flex b3-label">
+    <div class="fn__flex-1">
+        ${window.siyuan.languages.editorMarkdownInlineTag}
+        <div class="b3-label__text">${window.siyuan.languages.editorMarkdownInlineTagTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <input class="b3-switch fn__flex-center" id="editorMarkdownInlineTag" type="checkbox"${window.siyuan.config.editor.markdown.inlineTag ? " checked" : ""}/>
+</label>
+<label class="fn__flex b3-label">
+    <div class="fn__flex-1">
+        ${window.siyuan.languages.editorMarkdownInlineMath}
+        <div class="b3-label__text">${window.siyuan.languages.editorMarkdownInlineMathTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <input class="b3-switch fn__flex-center" id="editorMarkdownInlineMath" type="checkbox"${window.siyuan.config.editor.markdown.inlineMath ? " checked" : ""}/>
+</label>`;
     },
     bindEvent: () => {
         const fontFamilyElement = editor.element.querySelector("#fontFamily") as HTMLSelectElement;
@@ -286,6 +335,13 @@ export const editor = {
 
             fetchPost("/api/setting/setEditor", {
                 fullWidth: (editor.element.querySelector("#fullWidth") as HTMLInputElement).checked,
+                markdown: {
+                    inlineSup: (editor.element.querySelector("#editorMarkdownInlineSup") as HTMLInputElement).checked,
+                    inlineSub: (editor.element.querySelector("#editorMarkdownInlineSub") as HTMLInputElement).checked,
+                    inlineTag: (editor.element.querySelector("#editorMarkdownInlineTag") as HTMLInputElement).checked,
+                    inlineMath: (editor.element.querySelector("#editorMarkdownInlineMath") as HTMLInputElement).checked
+                },
+                allowHTMLBLockScript: (editor.element.querySelector("#allowHTMLBLockScript") as HTMLInputElement).checked,
                 justify: (editor.element.querySelector("#justify") as HTMLInputElement).checked,
                 rtl: (editor.element.querySelector("#rtl") as HTMLInputElement).checked,
                 readOnly: (editor.element.querySelector("#readOnly") as HTMLInputElement).checked,
@@ -294,9 +350,10 @@ export const editor = {
                 codeSyntaxHighlightLineNum: (editor.element.querySelector("#codeSyntaxHighlightLineNum") as HTMLInputElement).checked,
                 embedBlockBreadcrumb: (editor.element.querySelector("#embedBlockBreadcrumb") as HTMLInputElement).checked,
                 listLogicalOutdent: (editor.element.querySelector("#listLogicalOutdent") as HTMLInputElement).checked,
+                listItemDotNumberClickFocus: (editor.element.querySelector("#listItemDotNumberClickFocus") as HTMLInputElement).checked,
                 spellcheck: (editor.element.querySelector("#spellcheck") as HTMLInputElement).checked,
                 onlySearchForDoc: (editor.element.querySelector("#onlySearchForDoc") as HTMLInputElement).checked,
-                floatWindowMode: (editor.element.querySelector("#floatWindowMode") as HTMLInputElement).checked ? 0 : 1,
+                floatWindowMode: parseInt((editor.element.querySelector("#floatWindowMode") as HTMLSelectElement).value),
                 plantUMLServePath: (editor.element.querySelector("#plantUMLServePath") as HTMLInputElement).value,
                 katexMacros: (editor.element.querySelector("#katexMacros") as HTMLTextAreaElement).value,
                 codeLineWrap: (editor.element.querySelector("#codeLineWrap") as HTMLInputElement).checked,
@@ -336,10 +393,10 @@ export const editor = {
             });
         });
     },
-    _onSetEditor: (editorData: IEditor) => {
+    _onSetEditor: (editorData: Config.IEditor) => {
         const changeReadonly = editorData.readOnly !== window.siyuan.config.editor.readOnly;
         if (changeReadonly) {
-            editor.setReadonly(editorData.readOnly);
+            setReadOnly(editorData.readOnly);
         }
         window.siyuan.config.editor = editorData;
         getAllModels().editor.forEach((item) => {
@@ -358,6 +415,7 @@ export const editor = {
                 item.editor.protyle.contentElement.removeAttribute("data-fullwidth");
             }
         });
+
         setInlineStyle();
     }
 };

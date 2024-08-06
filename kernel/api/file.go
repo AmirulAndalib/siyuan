@@ -17,6 +17,7 @@
 package api
 
 import (
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -34,6 +35,59 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+func getUniqueFilename(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	filePath := arg["path"].(string)
+	ret.Data = map[string]interface{}{
+		"path": util.GetUniqueFilename(filePath),
+	}
+}
+
+func globalCopyFiles(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var srcs []string
+	srcsArg := arg["srcs"].([]interface{})
+	for _, s := range srcsArg {
+		srcs = append(srcs, s.(string))
+	}
+
+	for _, src := range srcs {
+		if !filelock.IsExist(src) {
+			msg := fmt.Sprintf("file [%s] does not exist", src)
+			logging.LogErrorf(msg)
+			ret.Code = -1
+			ret.Msg = msg
+			return
+		}
+	}
+
+	destDir := arg["destDir"].(string) // 相对于工作空间的路径
+	destDir = filepath.Join(util.WorkspaceDir, destDir)
+	for _, src := range srcs {
+		dest := filepath.Join(destDir, filepath.Base(src))
+		if err := filelock.Copy(src, dest); nil != err {
+			logging.LogErrorf("copy file [%s] to [%s] failed: %s", src, dest, err)
+			ret.Code = -1
+			ret.Msg = err.Error()
+			return
+		}
+	}
+}
 
 func copyFile(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
@@ -112,11 +166,29 @@ func getFile(c *gin.Context) {
 		return
 	}
 	if info.IsDir() {
-		logging.LogErrorf("file [%s] is a directory", fileAbsPath)
+		logging.LogErrorf("path [%s] is a directory path", fileAbsPath)
 		ret.Code = http.StatusMethodNotAllowed
-		ret.Msg = "file is a directory"
+		ret.Msg = "This is a directory path"
 		c.JSON(http.StatusAccepted, ret)
 		return
+	}
+
+	// REF: https://github.com/siyuan-note/siyuan/issues/11364
+	if role := model.GetGinContextRole(c); !model.IsValidRole(role, []model.Role{
+		model.RoleAdministrator,
+	}) {
+		if relPath, err := filepath.Rel(util.ConfDir, fileAbsPath); err != nil {
+			logging.LogErrorf("Get a relative path from [%s] to [%s] failed: %s", util.ConfDir, fileAbsPath, err)
+			ret.Code = http.StatusInternalServerError
+			ret.Msg = err.Error()
+			c.JSON(http.StatusAccepted, ret)
+			return
+		} else if relPath == "conf.json" {
+			ret.Code = http.StatusForbidden
+			ret.Msg = http.StatusText(http.StatusForbidden)
+			c.JSON(http.StatusAccepted, ret)
+			return
+		}
 	}
 
 	data, err := filelock.ReadFile(fileAbsPath)
