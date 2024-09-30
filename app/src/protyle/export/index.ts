@@ -10,7 +10,6 @@ import {confirmDialog} from "../../dialog/confirmDialog";
 import {getThemeMode, setInlineStyle} from "../../util/assets";
 import {fetchPost} from "../../util/fetch";
 import {Dialog} from "../../dialog";
-import {pathPosix} from "../../util/pathName";
 import {replaceLocalPath} from "../../editor/rename";
 import {setStorageVal} from "../util/compatibility";
 import {isPaidUser} from "../../util/needSubscribe";
@@ -81,7 +80,7 @@ const getSnippetCSS = () => {
 };
 
 /// #if !BROWSER
-const renderPDF = (id: string) => {
+const renderPDF = async (id: string) => {
     const localData = window.siyuan.storage[Constants.LOCAL_EXPORTPDF];
     const servePath = window.location.protocol + "//" + window.location.host;
     const isDefault = (window.siyuan.config.appearance.mode === 1 && window.siyuan.config.appearance.themeDark === "midnight") || (window.siyuan.config.appearance.mode === 0 && window.siyuan.config.appearance.themeLight === "daylight");
@@ -89,6 +88,9 @@ const renderPDF = (id: string) => {
     if (!isDefault) {
         themeStyle = `<link rel="stylesheet" type="text/css" id="themeStyle" href="${servePath}/appearance/themes/${window.siyuan.config.appearance.themeLight}/theme.css?${Constants.SIYUAN_VERSION}"/>`;
     }
+    const currentWindowId = await ipcRenderer.invoke(Constants.SIYUAN_GET, {
+        cmd: "getContentsId",
+    });
     // data-theme-mode="light" https://github.com/siyuan-note/siyuan/issues/7379
     const html = `<!DOCTYPE html>
 <html lang="${window.siyuan.config.appearance.lang}" data-theme-mode="light" data-light-theme="${window.siyuan.config.appearance.themeLight}" data-dark-theme="${window.siyuan.config.appearance.themeDark}">
@@ -102,6 +104,7 @@ const renderPDF = (id: string) => {
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <link rel="stylesheet" type="text/css" id="baseStyle" href="${servePath}/stage/build/export/base.css?${Constants.SIYUAN_VERSION}"/>
     <link rel="stylesheet" type="text/css" id="themeDefaultStyle" href="${servePath}/appearance/themes/daylight/theme.css?${Constants.SIYUAN_VERSION}"/>
+    <script src="${servePath}/stage/protyle/js/protyle-html.js?v=3.0.5"></script>
     ${themeStyle}
     <title>${window.siyuan.languages.export} PDF</title>
     <style>
@@ -111,9 +114,9 @@ const renderPDF = (id: string) => {
         }
         
         #action {
-          width: 200px;
+          width: 232px;
           background: var(--b3-theme-surface);
-          padding: 16px;
+          padding: 16px 0;
           position: fixed;
           right: 0;
           top: 0;
@@ -121,6 +124,8 @@ const renderPDF = (id: string) => {
           bottom: 0;
           overflow-x: hidden;
           z-index: 1;
+          display: flex;
+          flex-direction: column;
         }
         
         #preview {
@@ -156,8 +161,12 @@ const renderPDF = (id: string) => {
           border-bottom: 1px solid var(--b3-theme-surface-lighter);
           display: block;
           color: var(--b3-theme-on-surface);
-          padding-bottom: 12px;
-          margin-bottom: 12px;
+          padding-bottom: 16px;
+          margin: 0 16px 16px 16px;
+        }
+        
+        .b3-label:last-child {
+            border-bottom: none;
         }
         ${setInlineStyle(false)}
         ${document.getElementById("pluginsStyle").innerHTML}
@@ -166,91 +175,93 @@ const renderPDF = (id: string) => {
 </head>
 <body style="-webkit-print-color-adjust: exact;">
 <div id="action">
-    <div class="b3-label">
-        <div>
-            ${window.siyuan.languages.exportPDF0}
+    <div style="flex: 1;overflow: auto;">
+        <div class="b3-label">
+            <div>
+                ${window.siyuan.languages.exportPDF0}
+            </div>
+            <span class="fn__hr"></span>
+            <select class="b3-select" id="pageSize">
+                <option ${localData.pageSize === "A3" ? "selected" : ""} value="A3">A3</option>
+                <option ${localData.pageSize === "A4" ? "selected" : ""} value="A4">A4</option>
+                <option ${localData.pageSize === "A5" ? "selected" : ""} value="A5">A5</option>
+                <option ${localData.pageSize === "Legal" ? "selected" : ""} value="Legal">Legal</option>
+                <option ${localData.pageSize === "Letter" ? "selected" : ""} value="Letter">Letter</option>
+                <option ${localData.pageSize === "Tabloid" ? "selected" : ""} value="Tabloid">Tabloid</option>
+            </select>
         </div>
-        <span class="fn__hr"></span>
-        <select class="b3-select" id="pageSize">
-            <option ${localData.pageSize === "A3" ? "selected" : ""} value="A3">A3</option>
-            <option ${localData.pageSize === "A4" ? "selected" : ""} value="A4">A4</option>
-            <option ${localData.pageSize === "A5" ? "selected" : ""} value="A5">A5</option>
-            <option ${localData.pageSize === "Legal" ? "selected" : ""} value="Legal">Legal</option>
-            <option ${localData.pageSize === "Letter" ? "selected" : ""} value="Letter">Letter</option>
-            <option ${localData.pageSize === "Tabloid" ? "selected" : ""} value="Tabloid">Tabloid</option>
-        </select>
+        <div class="b3-label">
+            <div>
+                ${window.siyuan.languages.exportPDF2}
+            </div>
+            <span class="fn__hr"></span>
+            <select class="b3-select" id="marginsType">
+                <option ${localData.marginType === "default" ? "selected" : ""} value="default">${window.siyuan.languages.defaultMargin}</option>
+                <option ${localData.marginType === "none" ? "selected" : ""} value="none">${window.siyuan.languages.noneMargin}</option>
+                <option ${localData.marginType === "printableArea" ? "selected" : ""} value="printableArea">${window.siyuan.languages.minimalMargin}</option>
+                <option ${localData.marginType === "custom" ? "selected" : ""} value="custom">${window.siyuan.languages.customMargin}</option>
+            </select>
+            <div class="${localData.marginType === "custom" ? "" : "fn__none"}">
+                <span class="fn__hr"></span>
+                <div>${window.siyuan.languages.marginTop}</div>
+                <input id="marginsTop" class="b3-text-field fn__block" value="${localData.marginTop || 0}" type="number" min="0" step="0.01">
+                <span class="fn__hr"></span>
+                <div>${window.siyuan.languages.marginRight}</div>
+                <input id="marginsRight" class="b3-text-field fn__block" value="${localData.marginRight || 0}" type="number" min="0" step="0.01">
+                <span class="fn__hr"></span>
+                <div>${window.siyuan.languages.marginBottom}</div>
+                <input id="marginsBottom" class="b3-text-field fn__block" value="${localData.marginBottom || 0}" type="number" min="0" step="0.01">
+                <span class="fn__hr"></span>
+                <div>${window.siyuan.languages.marginLeft}</div>
+                <input id="marginsLeft" class="b3-text-field fn__block" value="${localData.marginLeft || 0}" type="number" min="0" step="0.01">
+            </div>
+        </div>
+        <div class="b3-label">
+            <div>
+                ${window.siyuan.languages.exportPDF3}
+                <span id="scaleTip" style="float: right;color: var(--b3-theme-on-background);">${localData.scale || 1}</span>
+            </div>
+            <span class="fn__hr"></span>
+            <input style="width: 192px" value="${localData.scale || 1}" id="scale" step="0.1" class="b3-slider" type="range" min="0.1" max="2">
+        </div>
+        <label class="b3-label">
+            <div>
+                ${window.siyuan.languages.exportPDF1}
+            </div>
+            <span class="fn__hr"></span>
+          <input id="landscape" class="b3-switch" type="checkbox" ${localData.landscape ? "checked" : ""}>
+        </label>
+        <label class="b3-label">
+            <div>
+                ${window.siyuan.languages.exportPDF4}
+            </div>
+            <span class="fn__hr"></span>
+            <input id="removeAssets" class="b3-switch" type="checkbox" ${localData.removeAssets ? "checked" : ""}>
+        </label>
+        <label class="b3-label">
+            <div>
+                ${window.siyuan.languages.exportPDF5}
+            </div>
+            <span class="fn__hr"></span>
+            <input id="keepFold" class="b3-switch" type="checkbox" ${localData.keepFold ? "checked" : ""}>
+        </label>
+        <label class="b3-label">
+            <div>
+                ${window.siyuan.languages.mergeSubdocs}
+            </div>
+            <span class="fn__hr"></span>
+            <input id="mergeSubdocs" class="b3-switch" type="checkbox" ${localData.mergeSubdocs ? "checked" : ""}>
+        </label>
+        <label class="b3-label">
+            <div>
+                ${window.siyuan.languages.export27}
+            </div>
+            <span class="fn__hr"></span>
+            <input id="watermark" class="b3-switch" type="checkbox" ${localData.watermark ? "checked" : ""}>
+            <div style="display:none;font-size: 12px;margin-top: 12px;color: var(--b3-theme-on-surface);">${window.siyuan.languages._kernel[214]}</div>
+        </label>
     </div>
-    <div class="b3-label">
-        <div>
-            ${window.siyuan.languages.exportPDF2}
-        </div>
-        <span class="fn__hr"></span>
-        <select class="b3-select" id="marginsType">
-            <option ${localData.marginType === "default" ? "selected" : ""} value="default">${window.siyuan.languages.defaultMargin}</option>
-            <option ${localData.marginType === "none" ? "selected" : ""} value="none">${window.siyuan.languages.noneMargin}</option>
-            <option ${localData.marginType === "printableArea" ? "selected" : ""} value="printableArea">${window.siyuan.languages.minimalMargin}</option>
-            <option ${localData.marginType === "custom" ? "selected" : ""} value="custom">${window.siyuan.languages.customMargin}</option>
-        </select>
-        <div class="${localData.marginType === "custom" ? "" : "fn__none"}">
-            <span class="fn__hr"></span>
-            <div>${window.siyuan.languages.marginTop}</div>
-            <input id="marginsTop" class="b3-text-field fn__block" value="${localData.marginTop || 0}" type="number" min="0" step="0.01">
-            <span class="fn__hr"></span>
-            <div>${window.siyuan.languages.marginRight}</div>
-            <input id="marginsRight" class="b3-text-field fn__block" value="${localData.marginRight || 0}" type="number" min="0" step="0.01">
-            <span class="fn__hr"></span>
-            <div>${window.siyuan.languages.marginBottom}</div>
-            <input id="marginsBottom" class="b3-text-field fn__block" value="${localData.marginBottom || 0}" type="number" min="0" step="0.01">
-            <span class="fn__hr"></span>
-            <div>${window.siyuan.languages.marginLeft}</div>
-            <input id="marginsLeft" class="b3-text-field fn__block" value="${localData.marginLeft || 0}" type="number" min="0" step="0.01">
-        </div>
-    </div>
-    <div class="b3-label">
-        <div>
-            ${window.siyuan.languages.exportPDF3}
-            <span id="scaleTip" style="float: right;color: var(--b3-theme-on-background);">${localData.scale || 1}</span>
-        </div>
-        <span class="fn__hr"></span>
-        <input style="width: 192px" value="${localData.scale || 1}" id="scale" step="0.1" class="b3-slider" type="range" min="0.1" max="2">
-    </div>
-    <label class="b3-label">
-        <div>
-            ${window.siyuan.languages.exportPDF1}
-        </div>
-        <span class="fn__hr"></span>
-      <input id="landscape" class="b3-switch" type="checkbox" ${localData.landscape ? "checked" : ""}>
-    </label>
-    <label class="b3-label">
-        <div>
-            ${window.siyuan.languages.exportPDF4}
-        </div>
-        <span class="fn__hr"></span>
-        <input id="removeAssets" class="b3-switch" type="checkbox" ${localData.removeAssets ? "checked" : ""}>
-    </label>
-    <label class="b3-label">
-        <div>
-            ${window.siyuan.languages.exportPDF5}
-        </div>
-        <span class="fn__hr"></span>
-        <input id="keepFold" class="b3-switch" type="checkbox" ${localData.keepFold ? "checked" : ""}>
-    </label>
-    <label class="b3-label">
-        <div>
-            ${window.siyuan.languages.mergeSubdocs}
-        </div>
-        <span class="fn__hr"></span>
-        <input id="mergeSubdocs" class="b3-switch" type="checkbox" ${localData.mergeSubdocs ? "checked" : ""}>
-    </label>
-    <label class="b3-label">
-        <div>
-            ${window.siyuan.languages.export27}
-        </div>
-        <span class="fn__hr"></span>
-        <input id="watermark" class="b3-switch" type="checkbox" ${localData.watermark ? "checked" : ""}>
-        <div style="display:none;font-size: 12px;margin-top: 12px;color: var(--b3-theme-on-surface);">${window.siyuan.languages._kernel[214]}</div>
-    </label>
-    <div class="fn__flex">
+    <div class="fn__flex" style="padding: 0 16px">
       <div class="fn__flex-1"></div>
       <button class="b3-button b3-button--cancel">${window.siyuan.languages.cancel}</button>
       <div class="fn__space"></div>
@@ -296,12 +307,14 @@ const renderPDF = (id: string) => {
             // 强制换行 https://ld246.com/article/1679228783553
             item.parentElement.setAttribute("linewrap", "true");
             item.parentElement.style.width = "";
+            item.parentElement.style.boxSizing = "border-box";
             item.parentElement.style.width = Math.min(item.parentElement.clientWidth, width) + "px";
             item.removeAttribute('data-render');
         })
         Protyle.highlightRender(previewElement, "${servePath}/stage/protyle");
         previewElement.querySelectorAll('[data-type="NodeMathBlock"]').forEach((item) => {
             item.style.width = "";
+            item.style.boxSizing = "border-box";
             item.style.width = Math.min(item.clientWidth, width) + "px";
             item.removeAttribute('data-render');
         })
@@ -372,7 +385,7 @@ const renderPDF = (id: string) => {
         })
     }
     const renderPreview = (data) => {
-        previewElement.innerHTML = '<div style="padding:0" class="protyle-wysiwyg${window.siyuan.config.editor.displayBookmarkIcon ? " protyle-wysiwyg--attr" : ""}">' + data.content + '</div>';
+        previewElement.innerHTML = '<div style="padding:6px 0 0 0" class="protyle-wysiwyg${window.siyuan.config.editor.displayBookmarkIcon ? " protyle-wysiwyg--attr" : ""}">' + data.content + '</div>';
         const wysElement = previewElement.querySelector(".protyle-wysiwyg");
         wysElement.setAttribute("data-doc-type", data.type || "NodeDocument");
         if (data.attrs.memo) {
@@ -410,6 +423,7 @@ const renderPDF = (id: string) => {
           config: {
             appearance: { mode: 0, codeBlockThemeDark: "${window.siyuan.config.appearance.codeBlockThemeDark}", codeBlockThemeLight: "${window.siyuan.config.appearance.codeBlockThemeLight}" },
             editor: { 
+              allowHTMLBLockScript: ${window.siyuan.config.editor.allowHTMLBLockScript},
               fontSize: ${window.siyuan.config.editor.fontSize},
               codeLineWrap: true,
               codeLigatures: ${window.siyuan.config.editor.codeLigatures},
@@ -534,6 +548,7 @@ const renderPDF = (id: string) => {
               removeAssets: actionElement.querySelector("#removeAssets").checked,
               rootId: "${id}",
               rootTitle: response.data.name,
+              parentWindowId: ${currentWindowId},
             })
             previewElement.classList.add("exporting");
             previewElement.style.zoom = "";
@@ -544,6 +559,13 @@ const renderPDF = (id: string) => {
         });
         setPadding();
         renderPreview(response.data);
+        window.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                const {ipcRenderer}  = require("electron");
+                ipcRenderer.send("${Constants.SIYUAN_CMD}", "destroy")
+                event.preventDefault();
+            }
+        })
     });
 </script></body></html>`;
     fetchPost("/api/export/exportTempContent", {content: html}, (response) => {
@@ -603,7 +625,7 @@ const getExportPath = (option: IExportOptions, removeAssets?: boolean, mergeSubd
                         hideMessage(msgId);
                         return;
                     }
-                    afterExport(path.join(savePath, replaceLocalPath(response.data.rootTitle)) + ".docx", msgId);
+                    afterExport(exportResponse.data.path, msgId);
                 } else {
                     onExport(exportResponse, savePath, option, removeAssets, msgId);
                 }
@@ -633,10 +655,13 @@ const onExport = (data: IWebSocketData, filePath: string, exportOption: IExportO
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes"/>
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <script src="stage/protyle/js/lute/lute.min.js"></script>
+    <script src="stage/protyle/js/protyle-html.js?v=3.0.5"></script>
     <link rel="stylesheet" type="text/css" id="baseStyle" href="stage/build/export/base.css?${Constants.SIYUAN_VERSION}"/>
     <link rel="stylesheet" type="text/css" id="themeDefaultStyle" href="appearance/themes/${themeName}/theme.css?${Constants.SIYUAN_VERSION}"/>
     ${themeStyle}
-    <title>${pathPosix().basename(filePath)} - ${window.siyuan.languages.siyuanNote}  v${Constants.SIYUAN_VERSION}</title>
+    <title>${data.data.name}</title>
+    <!-- Exported by SiYuan v${Constants.SIYUAN_VERSION} -->
     <style>
         body {font-family: var(--b3-font-family);background-color: var(--b3-theme-background);color: var(--b3-theme-on-background)}
         ${setInlineStyle(false)}

@@ -5,6 +5,7 @@ import {fetchPost} from "../util/fetch";
 import {Protyle} from "../protyle";
 import {setPanelFocus} from "../layout/util";
 import {App} from "../index";
+import {clearOBG} from "../layout/dock/util";
 
 export const newCardModel = (options: {
     app: App,
@@ -25,6 +26,9 @@ export const newCardModel = (options: {
         data: options.data,
         async init() {
             if (options.data.cardsData) {
+                for (let i = 0; i < options.app.plugins.length; i++) {
+                    options.data.cardsData = await options.app.plugins[i].updateCards(options.data.cardsData);
+                }
                 this.element.innerHTML = genCardHTML({
                     id: this.data.id,
                     cardType: this.data.cardType,
@@ -41,7 +45,7 @@ export const newCardModel = (options: {
                     cardsData: options.data.cardsData,
                     index: options.data.index,
                 });
-                this.data.editor = editor;
+                customObj.editors.push(editor);
                 // https://github.com/siyuan-note/siyuan/issues/9561#issuecomment-1794473512
                 delete options.data.cardsData;
                 delete options.data.index;
@@ -52,10 +56,14 @@ export const newCardModel = (options: {
                     deckID: this.data.id,
                     notebook: this.data.id,
                 }, async (response) => {
+                    let cardsData: ICardData = response.data;
+                    for (let i = 0; i < options.app.plugins.length; i++) {
+                        cardsData = await options.app.plugins[i].updateCards(response.data);
+                    }
                     this.element.innerHTML = genCardHTML({
                         id: this.data.id,
                         cardType: this.data.cardType,
-                        cardsData: response.data,
+                        cardsData,
                         isTab: true,
                     });
 
@@ -65,9 +73,10 @@ export const newCardModel = (options: {
                         id: this.data.id,
                         title: this.data.title,
                         cardType: this.data.cardType,
-                        cardsData: response.data,
+                        cardsData,
                     });
-                    customObj.data.editor = editor;
+
+                    customObj.editors.push(editor);
                 });
             }
         },
@@ -87,7 +96,10 @@ export const newCardModel = (options: {
                 rootID: this.data.id,
                 deckID: this.data.id,
                 notebook: this.data.id,
-            }, (response) => {
+            }, async (response) => {
+                for (let i = 0; i < options.app.plugins.length; i++) {
+                    options.data.cardsData = await options.app.plugins[i].updateCards(options.data.cardsData);
+                }
                 this.element.innerHTML = genCardHTML({
                     id: this.data.id,
                     cardType: this.data.cardType,
@@ -98,6 +110,7 @@ export const newCardModel = (options: {
         }
     });
     customObj.element.addEventListener("click", () => {
+        clearOBG();
         setPanelFocus(customObj.element.parentElement.parentElement);
     });
     return customObj;

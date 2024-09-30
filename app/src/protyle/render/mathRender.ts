@@ -16,9 +16,9 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
     if (mathElements.length === 0) {
         return;
     }
-    addStyle(`${cdn}/js/katex/katex.min.css?v=0.16.0`, "protyleKatexStyle");
-    addScript(`${cdn}/js/katex/katex.min.js?v=0.16.0`, "protyleKatexScript").then(() => {
-        addScript(`${cdn}/js/katex/mhchem.min.js?v=0.16.0`, "protyleKatexMhchemScript").then(() => {
+    addStyle(`${cdn}/js/katex/katex.min.css?v=0.16.9`, "protyleKatexStyle");
+    addScript(`${cdn}/js/katex/katex.min.js?v=0.16.9`, "protyleKatexScript").then(() => {
+        addScript(`${cdn}/js/katex/mhchem.min.js?v=0.16.9`, "protyleKatexMhchemScript").then(() => {
             mathElements.forEach((mathElement: HTMLElement) => {
                 if (mathElement.getAttribute("data-render") === "true") {
                     return;
@@ -72,7 +72,7 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
                             mathElement.style.overflowY = "";
                             mathElement.style.display = "";
                         }
-                        const nextSibling = hasNextSibling(mathElement);
+                        const nextSibling = hasNextSibling(mathElement) as HTMLElement;
                         if (!nextSibling) {
                             // 表格编辑问题 https://ld246.com/article/1629191424824
                             if (mathElement.parentElement.tagName !== "TH" && mathElement.parentElement.tagName !== "TD") {
@@ -83,7 +83,11 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
                                 // 随着浏览器的升级，从 beforeend 修改为 afterend
                                 mathElement.insertAdjacentText("afterend", Constants.ZWSP);
                             }
-                        } else if (nextSibling && nextSibling.nodeType !== 3 && (nextSibling as HTMLElement).getAttribute("data-type")?.indexOf("inline-math") > -1) {
+                        } else if (nextSibling && nextSibling.nodeType !== 3 &&
+                            (
+                                nextSibling.getAttribute("data-type")?.indexOf("inline-math") > -1 ||
+                                nextSibling.classList.contains("img")
+                            )) {
                             // 相邻的数学公式删除或光标移动有问题
                             mathElement.after(document.createTextNode(Constants.ZWSP));
                         } else if (nextSibling &&
