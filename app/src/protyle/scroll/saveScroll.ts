@@ -39,16 +39,22 @@ export const saveScroll = (protyle: IProtyle, getObject = false) => {
     if (getObject) {
         return attr;
     }
+
     window.siyuan.storage[Constants.LOCAL_FILEPOSITION][protyle.block.rootID] = attr;
-    setStorageVal(Constants.LOCAL_FILEPOSITION, window.siyuan.storage[Constants.LOCAL_FILEPOSITION]);
+    return new Promise(resolve => {
+        setStorageVal(Constants.LOCAL_FILEPOSITION, window.siyuan.storage[Constants.LOCAL_FILEPOSITION], () => {
+            resolve(true);
+        });
+    });
 };
 
 export const getDocByScroll = (options: {
     protyle: IProtyle,
-    scrollAttr: IScrollAttr,
+    scrollAttr?: IScrollAttr,
     mergedOptions?: IOptions,
     cb?: () => void
-    focus?: boolean
+    focus?: boolean,
+    updateReadonly?: boolean
 }) => {
     let actions: string[] = [];
     if (options.mergedOptions) {
@@ -60,21 +66,28 @@ export const getDocByScroll = (options: {
             actions = [Constants.CB_GET_UNUNDO];
         }
     }
-    if (options.scrollAttr.zoomInId) {
+    if (options.scrollAttr?.zoomInId) {
         fetchPost("/api/filetree/getDoc", {
             id: options.scrollAttr.zoomInId,
             size: Constants.SIZE_GET_MAX,
+            query: options.protyle.query?.key,
+            queryMethod: options.protyle.query?.method,
+            queryTypes: options.protyle.query?.types,
         }, response => {
             if (response.code === 1) {
                 fetchPost("/api/filetree/getDoc", {
                     id: options.scrollAttr.rootId || options.mergedOptions?.blockId || options.protyle.block?.rootID || options.scrollAttr.startId,
+                    query: options.protyle.query?.key,
+                    queryMethod: options.protyle.query?.method,
+                    queryTypes: options.protyle.query?.types,
                 }, response => {
                     onGet({
                         data: response,
                         protyle: options.protyle,
                         action: actions,
                         scrollAttr: options.scrollAttr,
-                        afterCB: options.cb
+                        afterCB: options.cb,
+                        updateReadonly: options.updateReadonly
                     });
                 });
             } else {
@@ -84,23 +97,28 @@ export const getDocByScroll = (options: {
                     protyle: options.protyle,
                     action: actions,
                     scrollAttr: options.scrollAttr,
-                    afterCB: options.cb
+                    afterCB: options.cb,
+                    updateReadonly: options.updateReadonly
                 });
             }
         });
         return;
     }
     fetchPost("/api/filetree/getDoc", {
-        id: options.scrollAttr.rootId || options.mergedOptions?.blockId || options.protyle.block?.rootID || options.scrollAttr.startId,
-        startID: options.scrollAttr.startId,
-        endID: options.scrollAttr.endId,
+        id: options.scrollAttr?.rootId || options.mergedOptions?.blockId || options.protyle.block?.rootID || options.scrollAttr?.startId,
+        startID: options.scrollAttr?.startId,
+        endID: options.scrollAttr?.endId,
+        query: options.protyle.query?.key,
+        queryMethod: options.protyle.query?.method,
+        queryTypes: options.protyle.query?.types,
     }, response => {
         onGet({
             data: response,
             protyle: options.protyle,
             action: actions,
             scrollAttr: options.scrollAttr,
-            afterCB: options.cb
+            afterCB: options.cb,
+            updateReadonly: options.updateReadonly
         });
     });
 };

@@ -98,7 +98,6 @@ export const initAbout = () => {
     <button class="b3-button b3-button--outline fn__block" id="exportData">
        <svg><use xlink:href="#iconUpload"></use></svg>${window.siyuan.languages.export}
     </button>
-    <div class="fn__hr"></div>
     <div class="b3-label__text">${window.siyuan.languages.exportDataTip}</div>
 </div>
 <div class="b3-label${window.siyuan.config.readonly ? " fn__none" : ""}">
@@ -110,8 +109,26 @@ export const initAbout = () => {
         <input id="importData" class="b3-form__upload" type="file">
         <svg><use xlink:href="#iconDownload"></use></svg> ${window.siyuan.languages.import}
     </button>
-    <div class="fn__hr"></div>
     <div class="b3-label__text">${window.siyuan.languages.importDataTip}</div>
+</div>
+<div class="b3-label">
+    ${window.siyuan.languages.exportConf}
+    <div class="fn__hr"></div>
+    <button class="b3-button b3-button--outline fn__block" id="exportConf">
+       <svg><use xlink:href="#iconUpload"></use></svg>${window.siyuan.languages.export}
+    </button>
+    <div class="b3-label__text">${window.siyuan.languages.exportConfTip}</div>
+</div>
+<div class="b3-label${window.siyuan.config.readonly ? " fn__none" : ""}">
+    <div class="fn__flex">
+        ${window.siyuan.languages.importConf}
+    </div>
+    <div class="fn__hr"></div>
+    <button class="b3-button b3-button--outline fn__block" style="position: relative">
+        <input id="importConf" class="b3-form__upload" type="file">
+        <svg><use xlink:href="#iconDownload"></use></svg> ${window.siyuan.languages.import}
+    </button>
+    <div class="b3-label__text">${window.siyuan.languages.importConfTip}</div>
 </div>
 <div class="b3-label${(!window.siyuan.config.readonly && (isInAndroid() || isInIOS())) ? "" : " fn__none"}">
     ${window.siyuan.languages.workspaceList}
@@ -131,7 +148,7 @@ export const initAbout = () => {
             <svg><use xlink:href="#iconCopy"></use></svg>${window.siyuan.languages.copy}
         </button>
     </div>
-    <div class="b3-label__text">${window.siyuan.languages.about14}</div>
+    <div class="b3-label__text" id="tokenTip">${window.siyuan.languages.about14.replace("${token}", window.siyuan.config.api.token)}</div>
 </div>
 <div class="b3-label">
     <div class="config-about__logo">
@@ -165,7 +182,7 @@ export const initAbout = () => {
                         const passwordDialog = new Dialog({
                             title: "🔑 " + window.siyuan.languages.key,
                             content: `<div class="b3-dialog__content">
-    <textarea class="b3-text-field fn__block" placeholder="${window.siyuan.languages.keyPlaceholder}"></textarea>
+    <textarea spellcheck="false" style="resize: vertical;"  class="b3-text-field fn__block" placeholder="${window.siyuan.languages.keyPlaceholder}"></textarea>
 </div>
 <div class="b3-dialog__action">
     <button class="b3-button b3-button--cancel">${window.siyuan.languages.cancel}</button><div class="fn__space"></div>
@@ -181,8 +198,8 @@ export const initAbout = () => {
                             passwordDialog.destroy();
                         });
                         btnsElement[1].addEventListener("click", () => {
-                            fetchPost("/api/repo/importRepoKey", {key: textAreaElement.value}, () => {
-                                window.siyuan.config.repo.key = textAreaElement.value;
+                            fetchPost("/api/repo/importRepoKey", {key: textAreaElement.value}, (response) => {
+                                window.siyuan.config.repo.key = response.data.key;
                                 importKeyElement.parentElement.classList.add("fn__none");
                                 importKeyElement.parentElement.nextElementSibling.classList.remove("fn__none");
                                 passwordDialog.destroy();
@@ -244,6 +261,13 @@ export const initAbout = () => {
                         break;
                     } else if (target.id === "exportData") {
                         fetchPost("/api/export/exportData", {}, response => {
+                            openByMobile(response.data.zip);
+                        });
+                        event.preventDefault();
+                        event.stopPropagation();
+                        break;
+                    } else if (target.id === "exportConf") {
+                        fetchPost("/api/system/exportConf", {}, response => {
                             openByMobile(response.data.zip);
                         });
                         event.preventDefault();
@@ -359,6 +383,20 @@ export const initAbout = () => {
                 formData.append("file", event.target.files[0]);
                 fetchPost("/api/import/importData", formData);
             });
+            modelMainElement.querySelector("#importConf").addEventListener("change", (event: InputEvent & {
+                target: HTMLInputElement
+            }) => {
+                const formData = new FormData();
+                formData.append("file", event.target.files[0]);
+                fetchPost("/api/system/importConf", formData, (response) => {
+                    if (response.code !== 0) {
+                        showMessage(response.msg);
+                        return;
+                    }
+
+                    exitSiYuan();
+                });
+            });
             const networkServeElement = modelMainElement.querySelector("#networkServe") as HTMLInputElement;
             networkServeElement.addEventListener("change", () => {
                 fetchPost("/api/system/setNetworkServe", {networkServe: networkServeElement.checked}, () => {
@@ -369,6 +407,7 @@ export const initAbout = () => {
             tokenElement.addEventListener("change", () => {
                 fetchPost("/api/system/setAPIToken", {token: tokenElement.value}, () => {
                     window.siyuan.config.api.token = tokenElement.value;
+                    modelMainElement.querySelector("#tokenTip").innerHTML = window.siyuan.languages.about14.replace("${token}", window.siyuan.config.api.token);
                 });
             });
         }
