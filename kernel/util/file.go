@@ -20,21 +20,79 @@ import (
 	"bytes"
 	"io"
 	"io/fs"
+	"mime"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/88250/gulu"
 	"github.com/88250/lute/ast"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/logging"
 )
 
+func GetFilePathsByExts(dirPath string, exts []string) (ret []string) {
+	filelock.Walk(dirPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			logging.LogErrorf("get file paths by ext failed: %s", err)
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		for _, ext := range exts {
+			if strings.HasSuffix(path, ext) {
+				ret = append(ret, path)
+				break
+			}
+		}
+		return nil
+	})
+	return
+}
+
+func GetUniqueFilename(filePath string) string {
+	if !gulu.File.IsExist(filePath) {
+		return filePath
+	}
+
+	ext := filepath.Ext(filePath)
+	base := strings.TrimSuffix(filepath.Base(filePath), ext)
+	dir := filepath.Dir(filePath)
+	i := 1
+	for {
+		newPath := filepath.Join(dir, base+" ("+strconv.Itoa(i)+")"+ext)
+		if !gulu.File.IsExist(newPath) {
+			return newPath
+		}
+		i++
+	}
+}
+
+func GetMimeTypeByExt(filePath string) (ret string) {
+	ret = mime.TypeByExtension(filepath.Ext(filePath))
+	if "" == ret {
+		m, err := mimetype.DetectFile(filePath)
+		if err != nil {
+			logging.LogErrorf("detect mime type of [%s] failed: %s", filePath, err)
+			return
+		}
+		if nil != m {
+			ret = m.String()
+		}
+	}
+	return
+}
+
 func IsSymlinkPath(absPath string) bool {
 	fi, err := os.Lstat(absPath)
-	if nil != err {
+	if err != nil {
 		return false
 	}
 	return 0 != fi.Mode()&os.ModeSymlink
@@ -46,7 +104,7 @@ func IsEmptyDir(p string) bool {
 	}
 
 	files, err := os.ReadDir(p)
-	if nil != err {
+	if err != nil {
 		return false
 	}
 	return 1 > len(files)
@@ -66,7 +124,7 @@ func IsPathRegularDirOrSymlinkDir(path string) bool {
 		return false
 	}
 
-	if nil != err {
+	if err != nil {
 		return false
 	}
 
@@ -173,17 +231,18 @@ func FilterFilePath(p string) (ret string) {
 }
 
 func FilterFileName(name string) string {
-	name = strings.ReplaceAll(name, "\\", "")
-	name = strings.ReplaceAll(name, "/", "")
-	name = strings.ReplaceAll(name, ":", "")
-	name = strings.ReplaceAll(name, "*", "")
-	name = strings.ReplaceAll(name, "?", "")
-	name = strings.ReplaceAll(name, "\"", "")
-	name = strings.ReplaceAll(name, "'", "")
-	name = strings.ReplaceAll(name, "<", "")
-	name = strings.ReplaceAll(name, ">", "")
-	name = strings.ReplaceAll(name, "|", "")
+	name = strings.ReplaceAll(name, "\\", "_")
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, ":", "_")
+	name = strings.ReplaceAll(name, "*", "_")
+	name = strings.ReplaceAll(name, "?", "_")
+	name = strings.ReplaceAll(name, "\"", "_")
+	name = strings.ReplaceAll(name, "'", "_")
+	name = strings.ReplaceAll(name, "<", "_")
+	name = strings.ReplaceAll(name, ">", "_")
+	name = strings.ReplaceAll(name, "|", "_")
 	name = strings.TrimSpace(name)
+	name = RemoveInvalid(name) // Remove invisible characters from file names when uploading assets https://github.com/siyuan-note/siyuan/issues/11683
 	return name
 }
 
@@ -216,33 +275,46 @@ func IsSubPath(absPath, toCheckPath string) bool {
 }
 
 func SizeOfDirectory(path string) (size int64, err error) {
-	err = filelock.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if nil != err {
+	err = filelock.Walk(path, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
 			return err
 		}
+
+		info, err := d.Info()
+		if err != nil {
+			logging.LogErrorf("size of dir [%s] failed: %s", path, err)
+			return err
+		}
+
 		if !info.IsDir() {
-			s := info.Size()
-			size += s
+			size += info.Size()
 		} else {
 			size += 4096
 		}
 		return nil
 	})
-	if nil != err {
+	if err != nil {
 		logging.LogErrorf("size of dir [%s] failed: %s", path, err)
 	}
 	return
 }
 
 func DataSize() (dataSize, assetsSize int64) {
-	filelock.Walk(DataDir, func(path string, info os.FileInfo, err error) error {
-		if nil != err {
+	filelock.Walk(DataDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
 			}
 			logging.LogErrorf("size of data failed: %s", err)
 			return io.EOF
 		}
+
+		info, err := d.Info()
+		if err != nil {
+			logging.LogErrorf("size of data failed: %s", err)
+			return nil
+		}
+
 		if !info.IsDir() {
 			s := info.Size()
 			dataSize += s
@@ -275,7 +347,7 @@ func IsReservedFilename(baseName string) bool {
 	return "assets" == baseName || "templates" == baseName || "widgets" == baseName || "emojis" == baseName || ".siyuan" == baseName || strings.HasPrefix(baseName, ".")
 }
 
-func WalkWithSymlinks(root string, fn filepath.WalkFunc) error {
+func WalkWithSymlinks(root string, fn fs.WalkDirFunc) error {
 	// 感谢 https://github.com/edwardrf/symwalk/blob/main/symwalk.go
 
 	rr, err := filepath.EvalSymlinks(root) // Find real base if there is any symlinks in the path
@@ -287,23 +359,27 @@ func WalkWithSymlinks(root string, fn filepath.WalkFunc) error {
 	return filelock.Walk(rr, getWalkFn(visitedDirs, fn))
 }
 
-func getWalkFn(visitedDirs map[string]struct{}, fn filepath.WalkFunc) filepath.WalkFunc {
-	return func(path string, info os.FileInfo, err error) error {
+func getWalkFn(visitedDirs map[string]struct{}, fn fs.WalkDirFunc) fs.WalkDirFunc {
+	return func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return fn(path, info, err)
+			return fn(path, d, err)
 		}
 
-		if info.IsDir() {
+		if d.IsDir() {
 			if _, ok := visitedDirs[path]; ok {
 				return filepath.SkipDir
 			}
 			visitedDirs[path] = struct{}{}
 		}
 
-		if err := fn(path, info, err); err != nil {
+		if err := fn(path, d, err); err != nil {
 			return err
 		}
 
+		info, err := d.Info()
+		if nil != err {
+			return err
+		}
 		if info.Mode()&os.ModeSymlink == 0 {
 			return nil
 		}

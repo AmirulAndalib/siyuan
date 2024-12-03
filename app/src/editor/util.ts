@@ -18,7 +18,12 @@ import {ipcRenderer, shell} from "electron";
 import {pushBack} from "../util/backForward";
 import {Asset} from "../asset";
 import {Layout} from "../layout";
-import {hasClosestBlock, hasClosestByAttribute, hasClosestByClassName,} from "../protyle/util/hasClosest";
+import {
+    hasClosestBlock,
+    hasClosestByAttribute,
+    hasClosestByClassName,
+    isInEmbedBlock,
+} from "../protyle/util/hasClosest";
 import {zoomOut} from "../menus/protyle";
 import {countBlockWord, countSelectWord} from "../layout/status";
 import {showMessage} from "../dialog/message";
@@ -28,17 +33,19 @@ import {Search} from "../search";
 import {App} from "../index";
 import {newCardModel} from "../card/newCardTab";
 import {preventScroll} from "../protyle/scroll/preventScroll";
+import {clearOBG} from "../layout/dock/util";
+import {Model} from "../layout/Model";
 
 export const openFileById = async (options: {
     app: App,
     id: string,
     position?: string,
     mode?: TEditorMode,
-    action?: string[]
+    action?: TProtyleAction[]
     keepCursor?: boolean
     zoomIn?: boolean
     removeCurrentTab?: boolean
-    afterOpen?: () => void
+    afterOpen?: (model: Model) => void
 }) => {
     const response = await fetchSyncPost("/api/block/getBlockInfo", {id: options.id});
     if (response.code === -1) {
@@ -86,9 +93,14 @@ export const openFile = async (options: IOpenFileOptions) => {
     document.querySelectorAll(".av__panel, .av__mask").forEach(item => {
         item.remove();
     });
+    // 打开 PDF 时移除文档光标
+    if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+    }
     const allModels = getAllModels();
     // 文档已打开
     if (options.assetPath) {
+        clearOBG();
         const asset = allModels.asset.find((item) => {
             if (item.path == options.assetPath) {
                 if (!pdfIsLoading(item.parent.parent.element)) {
@@ -101,11 +113,12 @@ export const openFile = async (options: IOpenFileOptions) => {
         });
         if (asset) {
             if (options.afterOpen) {
-                options.afterOpen();
+                options.afterOpen(asset);
             }
             return asset.parent;
         }
     } else if (options.custom) {
+        clearOBG();
         const custom = allModels.custom.find((item) => {
             if (objEquals(item.data, options.custom.data) && (!options.custom.id || options.custom.id === item.type)) {
                 if (!pdfIsLoading(item.parent.parent.element)) {
@@ -117,18 +130,19 @@ export const openFile = async (options: IOpenFileOptions) => {
         });
         if (custom) {
             if (options.afterOpen) {
-                options.afterOpen();
+                options.afterOpen(custom);
             }
             return custom.parent;
         }
         const hasModel = getUnInitTab(options);
         if (hasModel) {
             if (options.afterOpen) {
-                options.afterOpen();
+                options.afterOpen(hasModel.model);
             }
             return hasModel;
         }
     } else if (options.searchData) {
+        clearOBG();
         const search = allModels.search.find((item) => {
             if (objEquals(item.config, options.searchData)) {
                 if (!pdfIsLoading(item.parent.parent.element)) {
@@ -149,7 +163,10 @@ export const openFile = async (options: IOpenFileOptions) => {
                 if (hasClosestByClassName(item.element, "layout__wnd--active")) {
                     activeEditor = item;
                 }
-                editor = item;
+                if (!editor || item.headElement.getAttribute("data-activetime") > editor.headElement.getAttribute("data-activetime")) {
+                    // https://github.com/siyuan-note/siyuan/issues/11981#issuecomment-2351939812
+                    editor = item;
+                }
             }
             if (activeEditor) {
                 return true;
@@ -163,7 +180,7 @@ export const openFile = async (options: IOpenFileOptions) => {
                 switchEditor(editor, options, allModels);
             }
             if (options.afterOpen) {
-                options.afterOpen();
+                options.afterOpen(editor);
             }
             return editor.parent;
         }
@@ -171,7 +188,7 @@ export const openFile = async (options: IOpenFileOptions) => {
         const hasEditor = getUnInitTab(options);
         if (hasEditor) {
             if (options.afterOpen) {
-                options.afterOpen();
+                options.afterOpen(hasEditor.model);
             }
             return hasEditor;
         }
@@ -179,18 +196,24 @@ export const openFile = async (options: IOpenFileOptions) => {
 
     /// #if !BROWSER
     // https://github.com/siyuan-note/siyuan/issues/7491
-    let hasMatch = false;
-    const optionsClone = Object.assign({}, options);
-    delete optionsClone.app;    // 防止 JSON.stringify 时产生递归
-    hasMatch = await ipcRenderer.invoke(Constants.SIYUAN_GET, {
-        cmd: Constants.SIYUAN_OPEN_FILE,
-        options: JSON.stringify(optionsClone),
-    });
-    if (hasMatch) {
-        if (options.afterOpen) {
-            options.afterOpen();
+    if (!options.position || (options.position === "right" && options.assetPath)) {
+        let hasMatch = false;
+        const optionsClone: IObject = {};
+        Object.keys(options).forEach((key: keyof IOpenFileOptions) => {
+            if (key !== "app" && options[key] && typeof options[key] !== "function") {
+                optionsClone[key] = JSON.parse(JSON.stringify(options[key]));
+            }
+        });
+        hasMatch = await ipcRenderer.invoke(Constants.SIYUAN_GET, {
+            cmd: Constants.SIYUAN_OPEN_FILE,
+            options: JSON.stringify(optionsClone),
+        });
+        if (hasMatch) {
+            if (options.afterOpen) {
+                options.afterOpen();
+            }
+            return;
         }
-        return;
     }
     /// #endif
 
@@ -253,7 +276,7 @@ export const openFile = async (options: IOpenFileOptions) => {
             }
             wnd.showHeading();
             if (options.afterOpen) {
-                options.afterOpen();
+                options.afterOpen(createdTab.model);
             }
             return createdTab;
         }
@@ -290,7 +313,7 @@ export const openFile = async (options: IOpenFileOptions) => {
         }
         wnd.showHeading();
         if (options.afterOpen) {
-            options.afterOpen();
+            options.afterOpen(createdTab.model);
         }
         return createdTab;
     }
@@ -323,16 +346,6 @@ const getUnInitTab = (options: IOpenFileOptions) => {
 };
 
 const switchEditor = (editor: Editor, options: IOpenFileOptions, allModels: IModels) => {
-    allModels.editor.forEach((item) => {
-        if (!item.element.isSameNode(editor.element) && window.siyuan.editorIsFullscreen && item.element.classList.contains("fullscreen")) {
-            item.element.classList.remove("fullscreen");
-            resize(item.editor.protyle);
-        }
-    });
-    if (window.siyuan.editorIsFullscreen) {
-        editor.element.classList.add("fullscreen");
-        resize(editor.editor.protyle);
-    }
     if (options.keepCursor) {
         editor.parent.headElement.setAttribute("keep-cursor", options.id);
         return true;
@@ -349,7 +362,7 @@ const switchEditor = (editor: Editor, options: IOpenFileOptions, allModels: IMod
     }
     let nodeElement: Element;
     Array.from(editor.editor.protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${options.id}"]`)).find(item => {
-        if (!hasClosestByAttribute(item.parentElement, "data-type", "NodeBlockQueryEmbed")) {
+        if (!isInEmbedBlock(item)) {
             nodeElement = item;
             return true;
         }
@@ -373,7 +386,6 @@ const switchEditor = (editor: Editor, options: IOpenFileOptions, allModels: IMod
             if (nodeElement) {
                 const newRange = focusBlock(nodeElement);
                 if (newRange) {
-                    // 需要更新 range，否则文档大纲点击导致切换页签时因为 resize 中 `保持光标位置不变` 会导致光标跳动
                     editor.editor.protyle.toolbar.range = newRange;
                 }
                 scrollCenter(editor.editor.protyle, nodeElement, true);
@@ -542,14 +554,14 @@ export const updatePanelByEditor = (options: {
                 }
             }
         }
-        // 切换页签或关闭所有页签时，需更新对应的面板
-        const models = getAllModels();
-        updateOutline(models, options.protyle, options.reload);
-        updateBacklinkGraph(models, options.protyle);
         options.protyle.app.plugins.forEach(item => {
             item.eventBus.emit("switch-protyle", {protyle: options.protyle});
         });
     }
+    // 切换页签或关闭所有页签时，需更新对应的面板
+    const models = getAllModels();
+    updateOutline(models, options.protyle, options.reload);
+    updateBacklinkGraph(models, options.protyle);
 };
 
 export const isCurrentEditor = (blockId: string) => {
@@ -557,37 +569,41 @@ export const isCurrentEditor = (blockId: string) => {
     if (activeElement) {
         const tab = getInstanceById(activeElement.getAttribute("data-id"));
         if (tab instanceof Tab && tab.model instanceof Editor) {
-            if (tab.model.editor.protyle.block.rootID !== blockId &&
-                tab.model.editor.protyle.block.parentID !== blockId &&  // updateBacklinkGraph 时会传入 parentID
-                tab.model.editor.protyle.block.id !== blockId) {
-                return false;
+            if (tab.model.editor.protyle.block.rootID === blockId ||
+                tab.model.editor.protyle.block.parentID === blockId ||  // updateBacklinkGraph 时会传入 parentID
+                tab.model.editor.protyle.block.id === blockId) {
+                return true;
             }
         }
     }
-    return true;
+    return false;
 };
 
 export const updateOutline = (models: IModels, protyle: IProtyle, reload = false) => {
     models.outline.find(item => {
-        if (reload || (item.type === "pin" && (!protyle || item.blockId !== protyle.block?.rootID))) {
+        if (reload ||
+            (item.type === "pin" &&
+                (!protyle || item.blockId !== protyle.block?.rootID ||
+                    item.isPreview === protyle.preview.element.classList.contains("fn__none"))
+            )
+        ) {
             let blockId = "";
             if (protyle && protyle.block) {
                 blockId = protyle.block.rootID;
             }
-            if (blockId === item.blockId && !reload) {
+            if (blockId === item.blockId && !reload && item.isPreview !== protyle.preview.element.classList.contains("fn__none")) {
                 return;
             }
-            if (protyle && !protyle.preview.element.classList.contains("fn__none")) {
-                protyle.preview.render(protyle);
-                return;
-            }
+
             fetchPost("/api/outline/getDocOutline", {
                 id: blockId,
+                preview: !protyle.preview.element.classList.contains("fn__none")
             }, response => {
-                if (!reload && (!isCurrentEditor(blockId) || item.blockId === blockId)) {
+                if (!reload && (!isCurrentEditor(blockId) || item.blockId === blockId) &&
+                    item.isPreview !== protyle.preview.element.classList.contains("fn__none")) {
                     return;
                 }
-                item.isPreview = false;
+                item.isPreview = !protyle.preview.element.classList.contains("fn__none");
                 item.update(response, blockId);
                 if (protyle) {
                     item.updateDocTitle(protyle.background.ial);

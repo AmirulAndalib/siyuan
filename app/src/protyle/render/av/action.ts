@@ -2,44 +2,82 @@ import {Menu} from "../../../plugin/Menu";
 import {hasClosestBlock, hasClosestByAttribute, hasClosestByClassName} from "../../util/hasClosest";
 import {transaction} from "../../wysiwyg/transaction";
 import {openEditorTab} from "../../../menus/util";
-import {copySubMenu} from "../../../menus/commonMenuItem";
-import {getCellText, getTypeByCellElement, popTextCell, renderCell, updateHeaderCell} from "./cell";
-import {getColIconByType, showColMenu} from "./col";
-import {deleteRow, insertAttrViewBlockAnimation, setPageSize, updateHeader} from "./row";
+import {openFileAttr} from "../../../menus/commonMenuItem";
+import {
+    addDragFill,
+    genCellValueByElement,
+    getCellText,
+    getTypeByCellElement,
+    popTextCell,
+    renderCell,
+    renderCellAttr,
+    updateCellsValue,
+    updateHeaderCell
+} from "./cell";
+import {addCol, getColIconByType, showColMenu} from "./col";
+import {deleteRow, insertRows, selectRow, setPageSize, updateHeader} from "./row";
 import {emitOpenMenu} from "../../../plugin/EventBus";
-import {addCol} from "./col";
 import {openMenuPanel} from "./openMenuPanel";
 import {hintRef} from "../../hint/extend";
-import {focusByRange} from "../../util/selection";
+import {focusBlock, focusByRange} from "../../util/selection";
 import {showMessage} from "../../../dialog/message";
 import {previewImage} from "../../preview/image";
-import {isLocalPath, pathPosix} from "../../../util/pathName";
-import {Constants} from "../../../constants";
-/// #if !MOBILE
-import {openAsset} from "../../../editor/util";
-/// #endif
-import {getSearch} from "../../../util/functions";
 import {unicode2Emoji} from "../../../emoji";
-import {selectRow} from "./row";
 import * as dayjs from "dayjs";
 import {openCalcMenu} from "./calc";
 import {avRender} from "./render";
 import {addView, openViewMenu} from "./view";
-import {writeText} from "../../util/compatibility";
+import {isOnlyMeta, writeText} from "../../util/compatibility";
+import {openSearchAV} from "./relation";
+import {Constants} from "../../../constants";
+import {hideElements} from "../../ui/hideElements";
+import {fetchPost, fetchSyncPost} from "../../../util/fetch";
+import {scrollCenter} from "../../../util/highlightById";
+import {escapeHtml} from "../../../util/escape";
 
 export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLElement }) => {
+    if (isOnlyMeta(event)) {
+        return false;
+    }
     const blockElement = hasClosestBlock(event.target);
     if (!blockElement) {
         return false;
+    }
+
+    const loadMoreElement = hasClosestByAttribute(event.target, "data-type", "av-load-more");
+    if (loadMoreElement && !hasClosestByAttribute(event.target, "data-type", "set-page-size")) {
+        (blockElement.querySelector(".av__row--footer") as HTMLElement).style.transform = "";
+        blockElement.removeAttribute("data-render");
+        blockElement.dataset.pageSize = (parseInt(blockElement.dataset.pageSize) + parseInt(blockElement.querySelector('[data-type="set-page-size"]').getAttribute("data-size"))).toString();
+        avRender(blockElement, protyle);
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+    }
+    const firstColElement = hasClosestByClassName(event.target, "av__firstcol");
+    if (firstColElement) {
+        window.siyuan.menus.menu.remove();
+        selectRow(firstColElement, "toggle");
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+    }
+    const imgElement = hasClosestByClassName(event.target, "av__cellassetimg");
+    if (imgElement) {
+        previewImage((imgElement as HTMLImageElement).src);
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
     }
     if (event.shiftKey) {
         const rowElement = hasClosestByClassName(event.target, "av__row");
         if (rowElement && !rowElement.classList.contains("av__row--header")) {
             selectRow(rowElement.querySelector(".av__firstcol"), "toggle");
+            event.preventDefault();
+            event.stopPropagation();
             return true;
         }
     }
-
     const copyElement = hasClosestByAttribute(event.target, "data-type", "copy");
     if (copyElement) {
         writeText(getCellText(hasClosestByClassName(copyElement, "av__cell")));
@@ -48,6 +86,37 @@ export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLEle
         event.stopPropagation();
         return true;
     }
+
+    const searchIconElement = hasClosestByAttribute(event.target, "data-type", "av-search-icon");
+    if (searchIconElement) {
+        const searchElement = blockElement.querySelector('input[data-type="av-search"]') as HTMLInputElement;
+        searchElement.style.width = "128px";
+        searchElement.style.paddingLeft = "";
+        searchElement.style.paddingRight = "";
+        const viewsElement = hasClosestByClassName(searchElement, "av__views");
+        if (viewsElement) {
+            viewsElement.classList.add("av__views--show");
+        }
+        setTimeout(() => {
+            searchElement.focus();
+        }, Constants.TIMEOUT_TRANSITION);
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+    }
+    const viewItemElement = hasClosestByClassName(event.target, "item");
+    if (viewItemElement && viewItemElement.parentElement.classList.contains("layout-tab-bar")) {
+        if (viewItemElement.classList.contains("item--focus")) {
+            openViewMenu({protyle, blockElement, element: viewItemElement});
+        } else {
+            blockElement.removeAttribute("data-render");
+            avRender(blockElement, protyle, undefined, viewItemElement.dataset.id);
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+    }
+
 
     if (protyle.disabled) {
         return false;
@@ -73,19 +142,7 @@ export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLEle
             event.stopPropagation();
             return true;
         } else if (type === "av-add-more") {
-            const avID = blockElement.getAttribute("data-av-id");
-            const srcIDs = [Lute.NewNodeID()];
-            transaction(protyle, [{
-                action: "insertAttrViewBlock",
-                avID,
-                srcIDs,
-                isDetached: true,
-            }], [{
-                action: "removeAttrViewBlock",
-                srcIDs,
-                avID,
-            }]);
-            insertAttrViewBlockAnimation(protyle, blockElement, srcIDs, undefined, avID);
+            insertRows(blockElement, protyle, 1, undefined);
             event.preventDefault();
             event.stopPropagation();
             return true;
@@ -115,18 +172,13 @@ export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLEle
             event.stopPropagation();
             return true;
         } else if (type === "block-more") {
+            window.siyuan.menus.menu.remove();
             protyle.toolbar.range = document.createRange();
             protyle.toolbar.range.selectNodeContents(target);
             focusByRange(protyle.toolbar.range);
+            target.parentElement.classList.add("av__cell--select");
+            addDragFill(target.parentElement);
             hintRef(target.previousElementSibling.textContent.trim(), protyle, "av");
-            event.preventDefault();
-            event.stopPropagation();
-            return true;
-        } else if (type === "av-load-more") {
-            (blockElement.querySelector(".av__row--footer") as HTMLElement).style.transform = "";
-            blockElement.removeAttribute("data-render");
-            blockElement.dataset.pageSize = (parseInt(blockElement.dataset.pageSize) + parseInt(blockElement.querySelector('[data-type="set-page-size"]').getAttribute("data-size"))).toString();
-            avRender(blockElement, protyle);
             event.preventDefault();
             event.stopPropagation();
             return true;
@@ -141,59 +193,7 @@ export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLEle
             event.stopPropagation();
             return true;
         } else if (type === "av-add-bottom") {
-            const avID = blockElement.getAttribute("data-av-id");
-            const srcIDs = [Lute.NewNodeID()];
-            const previousID = blockElement.querySelector(".av__row--util").previousElementSibling.getAttribute("data-id") || "";
-            transaction(protyle, [{
-                action: "insertAttrViewBlock",
-                avID,
-                previousID,
-                srcIDs,
-                isDetached: true,
-            }], [{
-                action: "removeAttrViewBlock",
-                srcIDs,
-                avID,
-            }]);
-            insertAttrViewBlockAnimation(protyle, blockElement, srcIDs, previousID, avID);
-            event.preventDefault();
-            event.stopPropagation();
-            return true;
-        } else if (target.classList.contains("av__firstcol")) {
-            window.siyuan.menus.menu.remove();
-            selectRow(target, "toggle");
-            event.preventDefault();
-            event.stopPropagation();
-            return true;
-        } else if (target.classList.contains("av__celltext--url")) {
-            let linkAddress = target.textContent.trim();
-            if (target.dataset.type === "phone") {
-                linkAddress = "tel:" + linkAddress;
-            } else if (target.dataset.type === "email") {
-                linkAddress = "mailto:" + linkAddress;
-            } else if (target.classList.contains("b3-chip")) {
-                linkAddress = target.dataset.url;
-            }
-            /// #if !MOBILE
-            const suffix = pathPosix().extname(linkAddress);
-            if (isLocalPath(linkAddress) && (
-                [".pdf"].concat(Constants.SIYUAN_ASSETS_AUDIO).concat(Constants.SIYUAN_ASSETS_VIDEO).includes(suffix) && (
-                    suffix !== ".pdf" || (suffix === ".pdf" && !linkAddress.startsWith("file://"))
-                )
-            )) {
-                openAsset(protyle.app, linkAddress.trim(), parseInt(getSearch("page", linkAddress)), "right");
-            } else {
-                window.open(linkAddress);
-            }
-            /// #else
-            window.open(linkAddress);
-            /// #endif
-
-            event.preventDefault();
-            event.stopPropagation();
-            return true;
-        } else if (target.classList.contains("av__cellassetimg")) {
-            previewImage((target as HTMLImageElement).src);
+            insertRows(blockElement, protyle, 1, blockElement.querySelector(".av__row--util").previousElementSibling.getAttribute("data-id") || "");
             event.preventDefault();
             event.stopPropagation();
             return true;
@@ -212,8 +212,9 @@ export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLEle
                 if (!rowElement) {
                     return;
                 }
-                const type = getTypeByCellElement(target);
-                if (type === "updated" || type === "created" || (type === "block" && !target.getAttribute("data-detached"))) {
+                const cellType = getTypeByCellElement(target);
+                // TODO 点击单元格的时候， lineNumber 选中整行
+                if (cellType === "updated" || cellType === "created" || cellType === "lineNumber" || (cellType === "block" && !target.getAttribute("data-detached"))) {
                     selectRow(rowElement.querySelector(".av__firstcol"), "toggle");
                 } else {
                     scrollElement.querySelectorAll(".av__row--select").forEach(item => {
@@ -228,17 +229,7 @@ export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLEle
             event.stopPropagation();
             return true;
         } else if (target.classList.contains("av__calc")) {
-            openCalcMenu(protyle, target);
-            event.preventDefault();
-            event.stopPropagation();
-            return true;
-        } else if (target.classList.contains("item") && target.parentElement.classList.contains("layout-tab-bar")) {
-            if (target.classList.contains("item--focus")) {
-                openViewMenu({protyle, blockElement, element: target});
-            } else {
-                blockElement.removeAttribute("data-render");
-                avRender(blockElement, protyle, undefined, target.dataset.id);
-            }
+            openCalcMenu(protyle, target, undefined, event.clientX - 64);
             event.preventDefault();
             event.stopPropagation();
             return true;
@@ -249,6 +240,7 @@ export const avClick = (protyle: IProtyle, event: MouseEvent & { target: HTMLEle
 };
 
 export const avContextmenu = (protyle: IProtyle, rowElement: HTMLElement, position: IPosition) => {
+    hideElements(["hint"], protyle);
     if (rowElement.classList.contains("av__row--header")) {
         return false;
     }
@@ -269,15 +261,309 @@ export const avContextmenu = (protyle: IProtyle, rowElement: HTMLElement, positi
         });
     }
 
-    const menu = new Menu("av-row-menu");
-    if (menu.isOpen) {
-        return true;
-    }
+    const menu = new Menu();
     rowElement.classList.add("av__row--select");
     rowElement.querySelector(".av__firstcol use").setAttribute("xlink:href", "#iconCheck");
     const rowElements = blockElement.querySelectorAll(".av__row--select:not(.av__row--header)");
     updateHeader(rowElement);
+    const keyCellElement = rowElements[0].querySelector(".av__cell[data-block-id]") as HTMLElement;
+    const ids = Array.from(rowElements).map(item => item.getAttribute("data-id"));
+    if (rowElements.length === 1 && keyCellElement.getAttribute("data-detached") !== "true") {
+        /// #if !MOBILE
+        const blockId = ids[0];
+        const openSubmenus = openEditorTab(protyle.app, [blockId], undefined, undefined, true);
+        openSubmenus.push({id: "separator_3", type: "separator"});
+        openSubmenus.push({
+            icon: "iconAttr",
+            label: window.siyuan.languages.attr,
+            click: () => {
+                fetchPost("/api/attr/getBlockAttrs", {id: blockId}, (response) => {
+                    openFileAttr(response.data, "av", protyle);
+                });
+            }
+        });
+        menu.addItem({
+            id: "openBy",
+            label: window.siyuan.languages.openBy,
+            icon: "iconOpen",
+            submenu: openSubmenus,
+        });
+        /// #endif
+    }
+    let hasBlock = false;
+    rowElements.forEach((item) => {
+        if (item.querySelector('.av__cell[data-dtype="block"]').getAttribute("data-detached") !== "true") {
+            hasBlock = true;
+        }
+    });
+    const copyMenu: IMenu[] = [{
+        iconHTML: "",
+        label: window.siyuan.languages.keyContent,
+        click() {
+            let text = "";
+            rowElements.forEach((item, i) => {
+                if (rowElements.length > 1) {
+                    text += "* ";
+                }
+                text += item.querySelector('.av__cell[data-dtype="block"] .av__celltext').textContent.trim();
+                if (ids.length > 1 && i !== ids.length - 1) {
+                    text += "\n";
+                }
+            });
+            writeText(text);
+        }
+    }];
+    if (hasBlock) {
+        copyMenu.splice(1, 0, {
+            id: "copyBlockRef",
+            iconHTML: "",
+            label: window.siyuan.languages.copyBlockRef,
+            click: async () => {
+                let text = "";
+                for (let i = 0; i < ids.length; i++) {
+                    const id = ids[i];
+                    let content = "";
+                    const cellElement = rowElements[i].querySelector(".av__cell[data-dtype='block']");
+                    if (cellElement.getAttribute("data-detached") === "true") {
+                        content = cellElement.querySelector(".av__celltext").textContent;
+                    } else {
+                        const response = await fetchSyncPost("/api/block/getRefText", {id});
+                        content = `((${id} '${response.data}'))`;
+                    }
+                    if (ids.length > 1) {
+                        text += "* ";
+                    }
+                    text += content;
+                    if (ids.length > 1 && i !== ids.length - 1) {
+                        text += "\n";
+                    }
+                }
+                writeText(text);
+            }
+        }, {
+            id: "copyBlockEmbed",
+            iconHTML: "",
+            label: window.siyuan.languages.copyBlockEmbed,
+            click: () => {
+                let text = "";
+                ids.forEach((id, index) => {
+                    if (ids.length > 1) {
+                        text += "* ";
+                    }
+                    const cellElement = rowElements[index].querySelector(".av__cell[data-dtype='block']");
+                    if (cellElement.getAttribute("data-detached") === "true") {
+                        text += cellElement.querySelector(".av__celltext").textContent;
+                    } else {
+                        text += `{{select * from blocks where id='${id}'}}`;
+                    }
+                    if (ids.length > 1 && index !== ids.length - 1) {
+                        text += "\n";
+                    }
+                });
+                writeText(text);
+            }
+        }, {
+            id: "copyProtocol",
+            iconHTML: "",
+            label: window.siyuan.languages.copyProtocol,
+            click: () => {
+                let text = "";
+                ids.forEach((id, index) => {
+                    if (ids.length > 1) {
+                        text += "* ";
+                    }
+                    const cellElement = rowElements[index].querySelector(".av__cell[data-dtype='block']");
+                    if (cellElement.getAttribute("data-detached") === "true") {
+                        text += cellElement.querySelector(".av__celltext").textContent;
+                    } else {
+                        text += `siyuan://blocks/${id}`;
+                    }
+                    if (ids.length > 1 && index !== ids.length - 1) {
+                        text += "\n";
+                    }
+                });
+                writeText(text);
+            }
+        }, {
+            id: "copyProtocolInMd",
+            iconHTML: "",
+            label: window.siyuan.languages.copyProtocolInMd,
+            click: async () => {
+                let text = "";
+                for (let i = 0; i < ids.length; i++) {
+                    const id = ids[i];
+                    let content = "";
+                    const cellElement = rowElements[i].querySelector(".av__cell[data-dtype='block']");
+                    if (cellElement.getAttribute("data-detached") === "true") {
+                        content = cellElement.querySelector(".av__celltext").textContent;
+                    } else {
+                        const response = await fetchSyncPost("/api/block/getRefText", {id});
+                        content = `[${response.data}](siyuan://blocks/${id})`;
+                    }
+                    if (ids.length > 1) {
+                        text += "* ";
+                    }
+                    text += content;
+                    if (ids.length > 1 && i !== ids.length - 1) {
+                        text += "\n";
+                    }
+                }
+                writeText(text);
+            }
+        }, {
+            id: "copyHPath",
+            iconHTML: "",
+            label: window.siyuan.languages.copyHPath,
+            click: async () => {
+                let text = "";
+                for (let i = 0; i < ids.length; i++) {
+                    const id = ids[i];
+                    let content = "";
+                    const cellElement = rowElements[i].querySelector(".av__cell[data-dtype='block']");
+                    if (cellElement.getAttribute("data-detached") === "true") {
+                        content = cellElement.querySelector(".av__celltext").textContent;
+                    } else {
+                        const response = await fetchSyncPost("/api/filetree/getHPathByID", {id});
+                        content = response.data;
+                    }
+
+                    if (ids.length > 1) {
+                        text += "* ";
+                    }
+                    text += content;
+                    if (ids.length > 1 && i !== ids.length - 1) {
+                        text += "\n";
+                    }
+                }
+                writeText(text);
+            }
+        }, {
+            id: "copyID",
+            iconHTML: "",
+            label: window.siyuan.languages.copyID,
+            click: () => {
+                let text = "";
+                ids.forEach((id, index) => {
+                    if (ids.length > 1) {
+                        text += "* ";
+                    }
+                    const cellElement = rowElements[index].querySelector(".av__cell[data-dtype='block']");
+                    if (cellElement.getAttribute("data-detached") === "true") {
+                        text += cellElement.querySelector(".av__celltext").textContent;
+                    } else {
+                        text += id;
+                    }
+                    if (ids.length > 1 && index !== ids.length - 1) {
+                        text += "\n";
+                    }
+                });
+                writeText(text);
+            }
+        });
+    }
+
+    menu.addItem({
+        label: window.siyuan.languages.copy,
+        icon: "iconCopy",
+        type: "submenu",
+        submenu: copyMenu
+    });
     if (!protyle.disabled) {
+        menu.addItem({
+            label: window.siyuan.languages.addToDatabase,
+            icon: "iconDatabase",
+            click() {
+                openSearchAV(blockElement.getAttribute("data-av-id"), rowElements[0] as HTMLElement, (listItemElement) => {
+                    const srcs: IOperationSrcs[] = [];
+                    const sourceIds: string[] = [];
+                    rowElements.forEach(item => {
+                        const rowId = item.getAttribute("data-id");
+                        const blockValue = genCellValueByElement("block", item.querySelector(".av__cell[data-block-id]"));
+                        srcs.push({
+                            content: blockValue.block.content,
+                            id: rowId,
+                            isDetached: blockValue.isDetached,
+                        });
+                        sourceIds.push(rowId);
+                    });
+                    const avID = listItemElement.dataset.avId;
+                    transaction(protyle, [{
+                        action: "insertAttrViewBlock",
+                        avID,
+                        ignoreFillFilter: true,
+                        srcs,
+                        blockID: listItemElement.dataset.blockId
+                    }, {
+                        action: "doUpdateUpdated",
+                        id: listItemElement.dataset.blockId,
+                        data: dayjs().format("YYYYMMDDHHmmss"),
+                    }], [{
+                        action: "removeAttrViewBlock",
+                        srcIDs: sourceIds,
+                        avID,
+                    }]);
+                });
+            }
+        });
+        if (rowElements.length === 1) {
+            if (keyCellElement.getAttribute("data-detached") !== "true") {
+                menu.addSeparator();
+            }
+            menu.addItem({
+                icon: "iconBefore",
+                label: `<div class="fn__flex" style="align-items: center;">
+${window.siyuan.languages.insertRowBefore.replace("${x}", '<span class="fn__space"></span><input style="width:64px" type="number" step="1" min="1" value="1" placeholder="${window.siyuan.languages.enterKey}" class="b3-text-field"><span class="fn__space"></span>')}
+</div>`,
+                bind(element) {
+                    const inputElement = element.querySelector("input");
+                    element.addEventListener("click", () => {
+                        if (document.activeElement.isSameNode(inputElement)) {
+                            return;
+                        }
+                        insertRows(blockElement, protyle, parseInt(inputElement.value), rowElements[0].previousElementSibling.getAttribute("data-id"));
+                        menu.close();
+                    });
+                    inputElement.addEventListener("keydown", (event: KeyboardEvent) => {
+                        if (!event.isComposing && event.key === "Enter") {
+                            insertRows(blockElement, protyle, parseInt(inputElement.value), rowElements[0].previousElementSibling.getAttribute("data-id"));
+                            menu.close();
+                        }
+                    });
+                }
+            });
+            menu.addItem({
+                icon: "iconAfter",
+                label: `<div class="fn__flex" style="align-items: center;">
+${window.siyuan.languages.insertRowAfter.replace("${x}", '<span class="fn__space"></span><input style="width:64px" type="number" step="1" min="1" placeholder="${window.siyuan.languages.enterKey}" class="b3-text-field" value="1"><span class="fn__space"></span>')}
+</div>`,
+                bind(element) {
+                    const inputElement = element.querySelector("input");
+                    element.addEventListener("click", () => {
+                        if (document.activeElement.isSameNode(inputElement)) {
+                            return;
+                        }
+                        insertRows(blockElement, protyle, parseInt(inputElement.value), rowElements[0].getAttribute("data-id"));
+                        menu.close();
+                    });
+                    inputElement.addEventListener("keydown", (event: KeyboardEvent) => {
+                        if (!event.isComposing && event.key === "Enter") {
+                            insertRows(blockElement, protyle, parseInt(inputElement.value), rowElements[0].getAttribute("data-id"));
+                            menu.close();
+                        }
+                    });
+                }
+            });
+            menu.addSeparator();
+            if (keyCellElement.getAttribute("data-detached") !== "true") {
+                menu.addItem({
+                    label: window.siyuan.languages.unbindBlock,
+                    icon: "iconLinkOff",
+                    click() {
+                        updateCellsValue(protyle, blockElement, keyCellElement.querySelector(".av__celltext").textContent, [keyCellElement]);
+                    }
+                });
+            }
+        }
         menu.addItem({
             icon: "iconTrashcan",
             label: window.siyuan.languages.delete,
@@ -285,21 +571,6 @@ export const avContextmenu = (protyle: IProtyle, rowElement: HTMLElement, positi
                 deleteRow(blockElement, protyle);
             }
         });
-    }
-    if (rowElements.length === 1 && !rowElements[0].querySelector('[data-detached="true"]')) {
-        if (!protyle.disabled) {
-            menu.addSeparator();
-        }
-        openEditorTab(protyle.app, rowElements[0].getAttribute("data-id"));
-        menu.addItem({
-            label: window.siyuan.languages.copy,
-            icon: "iconCopy",
-            type: "submenu",
-            submenu: copySubMenu(rowElements[0].getAttribute("data-id"))
-        });
-    }
-    if (!protyle.disabled) {
-        menu.addSeparator();
         const editAttrSubmenu: IMenu[] = [];
         rowElement.parentElement.querySelectorAll(".av__row--header .av__cell").forEach((cellElement: HTMLElement) => {
             let hideBlock = false;
@@ -317,7 +588,7 @@ export const avContextmenu = (protyle: IProtyle, rowElement: HTMLElement, positi
                 const icon = cellElement.dataset.icon;
                 editAttrSubmenu.push({
                     iconHTML: icon ? unicode2Emoji(icon, "b3-menu__icon", true) : `<svg class="b3-menu__icon"><use xlink:href="#${getColIconByType(type)}"></use></svg>`,
-                    label: cellElement.querySelector(".av__celltext").textContent.trim(),
+                    label: escapeHtml(cellElement.querySelector(".av__celltext").textContent.trim()),
                     click() {
                         popTextCell(protyle, selectElements);
                     }
@@ -326,7 +597,7 @@ export const avContextmenu = (protyle: IProtyle, rowElement: HTMLElement, positi
         });
         menu.addItem({
             icon: "iconAttr",
-            label: window.siyuan.languages.attr,
+            label: window.siyuan.languages.fields,
             type: "submenu",
             submenu: editAttrSubmenu
         });
@@ -396,15 +667,47 @@ export const updateAttrViewCellAnimation = (cellElement: HTMLElement, value: IAV
     pin?: boolean,
     type?: TAVCol
 }) => {
+    // 属性面板更新列名
+    if (!cellElement) {
+        return;
+    }
     if (headerValue) {
         updateHeaderCell(cellElement, headerValue);
     } else {
+        const hasDragFill = cellElement.querySelector(".av__drag-fill");
         cellElement.innerHTML = renderCell(value);
+        if (hasDragFill) {
+            addDragFill(cellElement);
+        }
+        renderCellAttr(cellElement, value);
     }
 };
 
 export const removeAttrViewColAnimation = (blockElement: Element, id: string) => {
     blockElement.querySelectorAll(`.av__cell[data-col-id="${id}"]`).forEach(item => {
         item.remove();
+    });
+};
+
+export const duplicateCompletely = (protyle: IProtyle, nodeElement: HTMLElement) => {
+    fetchPost("/api/av/duplicateAttributeViewBlock", {avID: nodeElement.getAttribute("data-av-id")}, (response) => {
+        nodeElement.classList.remove("protyle-wysiwyg--select");
+        const tempElement = document.createElement("template");
+        tempElement.innerHTML = protyle.lute.SpinBlockDOM(`<div data-node-id="${response.data.blockID}" data-av-id="${response.data.avID}" data-type="NodeAttributeView" data-av-type="table"></div>`);
+        const cloneElement = tempElement.content.firstElementChild;
+        nodeElement.after(cloneElement);
+        avRender(cloneElement, protyle, () => {
+            focusBlock(cloneElement);
+            scrollCenter(protyle);
+        });
+        transaction(protyle, [{
+            action: "insert",
+            data: cloneElement.outerHTML,
+            id: response.data.blockID,
+            previousID: nodeElement.dataset.nodeId,
+        }], [{
+            action: "delete",
+            id: response.data.blockID,
+        }]);
     });
 };
