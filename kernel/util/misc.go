@@ -18,12 +18,46 @@ package util
 
 import (
 	"bytes"
+	"fmt"
+	"math/rand"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/88250/lute/html"
 )
+
+func init() {
+	rand.Seed(time.Now().UTC().UnixNano())
+}
+
+func GetDuplicateName(master string) (ret string) {
+	ret = master + " (1)"
+	r := regexp.MustCompile("^(.*) \\((\\d+)\\)$")
+	m := r.FindStringSubmatch(master)
+	if nil == m || 3 > len(m) {
+		return
+	}
+
+	num, _ := strconv.Atoi(m[2])
+	num++
+	ret = fmt.Sprintf("%s (%d)", m[1], num)
+	return
+}
+
+var (
+	letter = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+)
+
+func RandString(length int) string {
+	b := make([]rune, length)
+	for i := range b {
+		b[i] = letter[rand.Intn(len(letter))]
+	}
+	return string(b)
+}
 
 // InsertElem inserts value at index into a.
 // 0 <= index <= len(s)
@@ -42,11 +76,24 @@ func RemoveElem[T any](s []T, index int) []T {
 	return append(s[:index], s[index+1:]...)
 }
 
-func EscapeHTML(s string) string {
-	if ContainsSubStr(s, []string{"&amp;", "&#39;", "&lt;", "&gt;", "&#34;", "&#13;"}) {
-		return s
+func EscapeHTML(s string) (ret string) {
+	ret = s
+	if "" == strings.TrimSpace(ret) {
+		return
 	}
-	return html.EscapeString(s)
+
+	ret = html.EscapeString(ret)
+	return
+}
+
+func UnescapeHTML(s string) (ret string) {
+	ret = s
+	if "" == strings.TrimSpace(ret) {
+		return
+	}
+
+	ret = html.UnescapeString(ret)
+	return
 }
 
 func Reverse(s string) string {
@@ -84,9 +131,22 @@ func RemoveRedundantSpace(str string) string {
 	return buf.String()
 }
 
-func IsNumeric(s string) bool {
-	_, err := strconv.ParseFloat(s, 64)
-	return err == nil
+func Convert2Float(s string) (float64, bool) {
+	s = RemoveInvalid(s)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, ",", "")
+	buf := bytes.Buffer{}
+	for _, r := range s {
+		if unicode.IsDigit(r) || '.' == r || '-' == r {
+			buf.WriteRune(r)
+		}
+	}
+	s = buf.String()
+	ret, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0, false
+	}
+	return ret, true
 }
 
 func ContainsSubStr(s string, subStrs []string) bool {
@@ -96,4 +156,19 @@ func ContainsSubStr(s string, subStrs []string) bool {
 		}
 	}
 	return false
+}
+
+func ReplaceStr(strs []string, old, new string) (ret []string, changed bool) {
+	if old == new {
+		return strs, false
+	}
+
+	for i, v := range strs {
+		if v == old {
+			strs[i] = new
+			changed = true
+		}
+	}
+	ret = strs
+	return
 }
