@@ -4,6 +4,8 @@ import {genEmptyBlock} from "../../block/util";
 import * as dayjs from "dayjs";
 import {Constants} from "../../constants";
 import {moveToPrevious} from "./remove";
+import {hasClosestByClassName} from "../util/hasClosest";
+import {setFold} from "../../menus/protyle";
 
 export const updateListOrder = (listElement: Element, sIndex?: number) => {
     if (listElement.getAttribute("data-subtype") !== "o") {
@@ -42,6 +44,37 @@ export const genListItemElement = (listItemElement: Element, offset = 0, wbr = f
     return element.content.firstElementChild as HTMLElement;
 };
 
+export const addSubList = (protyle: IProtyle, nodeElement: Element, range: Range) => {
+    const parentItemElement = hasClosestByClassName(nodeElement, "li");
+    if (!parentItemElement) {
+        return;
+    }
+    const lastSubItem = parentItemElement.querySelector(".list")?.lastElementChild.previousElementSibling;
+    if (!lastSubItem) {
+        return;
+    }
+    const newListElement = genListItemElement(lastSubItem, 0, true);
+    const id = newListElement.getAttribute("data-node-id");
+    lastSubItem.after(newListElement);
+
+    if (lastSubItem.parentElement.getAttribute("fold") === "1") {
+        setFold(protyle, lastSubItem.parentElement, true);
+    }
+    if (parentItemElement.getAttribute("fold") === "1") {
+        setFold(protyle, parentItemElement, true);
+    }
+    transaction(protyle, [{
+        action: "insert",
+        id,
+        data: newListElement.outerHTML,
+        previousID: lastSubItem.getAttribute("data-node-id"),
+    }], [{
+        action: "delete",
+        id,
+    }]);
+    focusByWbr(newListElement, range);
+};
+
 export const listIndent = (protyle: IProtyle, liItemElements: Element[], range: Range) => {
     const previousElement = liItemElements[0].previousElementSibling as HTMLElement;
     if (!previousElement) {
@@ -50,7 +83,6 @@ export const listIndent = (protyle: IProtyle, liItemElements: Element[], range: 
     range.collapse(false);
     range.insertNode(document.createElement("wbr"));
     liItemElements.forEach(item => {
-        item.classList.remove("protyle-wysiwyg--select");
         item.removeAttribute("select-start");
         item.removeAttribute("select-end");
     });
@@ -84,7 +116,7 @@ export const listIndent = (protyle: IProtyle, liItemElements: Element[], range: 
                 previousElement.lastElementChild.previousElementSibling.lastElementChild.before(item);
             } else if (subtype === "t") {
                 item.setAttribute("data-marker", "*");
-                actionElement.innerHTML = '<svg><use xlink:href="#iconUncheck"></use></svg>';
+                actionElement.innerHTML = `<svg><use xlink:href="#icon${item.classList.contains("protyle-task--done") ? "Check" : "Uncheck"}"></use></svg>`;
                 actionElement.classList.remove("protyle-action--order");
                 actionElement.classList.add("protyle-action--task");
                 previousElement.lastElementChild.previousElementSibling.lastElementChild.before(item);
@@ -315,7 +347,6 @@ export const listOutdent = (protyle: IProtyle, liItemElements: Element[], range:
         let nextElement = liItemElements[liItemElements.length - 1].nextElementSibling;
         let lastBlockElement = liItemElements[liItemElements.length - 1].lastElementChild.previousElementSibling;
         liItemElements.forEach(item => {
-            item.classList.remove("protyle-wysiwyg--select");
             item.removeAttribute("select-start");
             item.removeAttribute("select-end");
             Array.from(item.children).forEach((blockElement, index) => {
@@ -474,7 +505,6 @@ export const listOutdent = (protyle: IProtyle, liItemElements: Element[], range:
     const undoOperations: IOperation[] = [];
     const previousID = liItemElements[0].previousElementSibling?.getAttribute("data-node-id");
     liItemElements.forEach(item => {
-        item.classList.remove("protyle-wysiwyg--select");
         item.removeAttribute("select-start");
         item.removeAttribute("select-end");
     });
@@ -509,6 +539,7 @@ export const listOutdent = (protyle: IProtyle, liItemElements: Element[], range:
             item.querySelector(".protyle-action").outerHTML = '<div class="protyle-action" draggable="true"><svg><use xlink:href="#iconDot"></use></svg></div>';
             item.setAttribute("data-subtype", "u");
             item.setAttribute("data-marker", "*");
+            item.classList.remove("protyle-task--done");
             doOperations.push({
                 action: "update",
                 id: itemId,
@@ -529,7 +560,7 @@ export const listOutdent = (protyle: IProtyle, liItemElements: Element[], range:
                 id: itemId,
                 data: item.outerHTML
             });
-        } else if ((item.getAttribute("data-subtype") === "u" || item.getAttribute("data-subtype") === "0") &&
+        } else if ((item.getAttribute("data-subtype") === "u" || item.getAttribute("data-subtype") === "o") &&
             parentLiItemElement.getAttribute("data-subtype") === "t") {
             undoOperations.push({
                 action: "update",

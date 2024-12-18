@@ -31,19 +31,23 @@ export class Link extends ToolbarItem {
             try {
                 const clipText = await readText();
                 // 选中链接时需忽略剪切板内容 https://ld246.com/article/1643035329737
-                if (protyle.lute.IsValidLinkDest(rangeString)) {
-                    dataHref = rangeString;
-                } else if (protyle.lute.IsValidLinkDest(clipText)) {
-                    dataHref = clipText;
-                } else {
+                dataHref = protyle.lute.GetLinkDest(rangeString);
+                if (!dataHref) {
+                    dataHref = protyle.lute.GetLinkDest(clipText);
+                }
+                if (!dataHref) {
                     // 360
                     const lastSpace = clipText.lastIndexOf(" ");
                     if (lastSpace > -1) {
-                        if (protyle.lute.IsValidLinkDest(clipText.substring(lastSpace))) {
-                            dataHref = clipText.substring(lastSpace);
+                        dataHref = protyle.lute.GetLinkDest(clipText.substring(lastSpace));
+                        if (dataHref) {
                             dataText = clipText.substring(0, lastSpace);
                         }
                     }
+                }
+                // https://github.com/siyuan-note/siyuan/issues/12867
+                if (!dataHref && clipText.startsWith("assets/")) {
+                    dataHref = clipText;
                 }
             } catch (e) {
                 console.log(e);
