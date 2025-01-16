@@ -2,35 +2,33 @@
 
 ## Get the source code
 
-* `git clone --depth=1 git@github.com:siyuan-note/siyuan.git`
+* `git clone git@github.com:siyuan-note/siyuan.git`
 * switch to dev branch `git checkout dev`
-
-Note: `app/stage/protyle/**` is managed by git lfs, and you don't need to pay attention to it under normal circumstances, related to [#9253](https://github.com/siyuan-note/siyuan/issues/9253).
 
 ## User Interface
 
-Install pnpm: `npm install -g pnpm`
+Install pnpm: `npm install -g pnpm@9.12.1`
 
 <details>
 <summary>For China mainland</summary>
 
 Set the Electron mirror environment variable and install Electron:
 
-* macOS/Linux: `ELECTRON_MIRROR=https://registry.npmmirror.com/mirrors/electron/ pnpm install electron@28.2.0 -D`
+* macOS/Linux: `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ pnpm install electron@v32.2.8 -D`
 * Windows:
-    * `SET ELECTRON_MIRROR=https://registry.npmmirror.com/mirrors/electron/`
-    * `pnpm install electron@28.2.0 -D`
+    * `SET ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`
+    * `pnpm install electron@v32.2.8 -D`
 
 NPM mirror:
 
 * Use npmmirror China mirror repository `pnpm --registry https://registry.npmmirror.com/ i`
-* Revert to using official repository `pnpm --registry https://registry.npmmirror.com i`
+* Revert to using official repository `pnpm --registry https://registry.npmjs.org i`
 
 </details>
 
 On the desktop, go to the app folder to run:
 
-* `pnpm install electron@28.2.0 -D`
+* `pnpm install electron@v32.2.8 -D`
 * `pnpm run dev`
 * `pnpm run start`
 
@@ -60,4 +58,10 @@ Note: In the development environment, the kernel process will not be automatical
 * `gomobile bind --tags fts5 -ldflags '-s -w' -v -o kernel.aar -target='android/arm64' -androidapi 24 ./mobile/`
 * https://github.com/siyuan-note/siyuan-android
 
-For the mobile-end, please refer to the corresponding project repository.
+### Harmony
+
+Only support compilation under Linux, need to install Harmony SDK, and need to modify Go source code, please refer to https://github.com/siyuan-note/siyuan/issues/13184
+
+* `cd kernel/harmony`
+* `./build.sh` (`./build-win.sh` for Windows Emulator)
+* https://github.com/siyuan-note/siyuan-harmony
