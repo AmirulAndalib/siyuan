@@ -14,7 +14,6 @@
 @import "business/graph";
 @import "business/layout";
 @import "business/block";
-@import "business/drag";
 @import "util/reset";
 @import "util/function";
 @import "business/history";
@@ -27,6 +26,8 @@
 @import "business/custom";
 @import "business/av";
 @import "business/search";
+@import "business/emojis";
+@import "component/svg";
 
 .block__popover {
   width: 80vw;
@@ -45,7 +46,6 @@
   }
 
   .b3-list-item {
-
     font-size: 16px;
     line-height: 40px;
 
@@ -53,17 +53,21 @@
       font-size: 18px;
       line-height: 32px;
       height: auto;
+
+      &:hover {
+        background-color: transparent;
+      }
     }
 
     &__graphic {
       width: 18px;
-      height: 40px;
-      line-height: 40px;
+      height: 18px;
+      line-height: 18px;
       font-size: 18px;
     }
 
     &__toggle {
-      height: 24px;
+      height: 32px;
       padding: 4px;
     }
 
@@ -126,13 +130,22 @@
     border-radius: var(--b3-border-radius);
 
     &[disabled] {
-      opacity: 0.38;
+      opacity: .38;
     }
 
     &--active,
     &:not(.toolbar__icon-deactivate):focus,
     &:not(.toolbar__icon-deactivate):hover {
       background-color: var(--b3-list-hover);
+    }
+
+    &--history {
+      height: 36px;
+      width: 36px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 0;
     }
   }
 
@@ -146,10 +159,6 @@
     border: 0;
     background-color: transparent;
     color: var(--b3-theme-on-background);
-  }
-
-  &__search {
-    margin: 8px;
   }
 
   &__text {
@@ -168,7 +177,7 @@
   width: 100vw;
   z-index: 7;
   transform: translateX(-100vw);
-  transition: transform 0.15s cubic-bezier(0, 0, 0.2, 1) 0ms;
+  transition: transform .15s cubic-bezier(0, 0, .2, 1) 0ms;
 
   &--all {
     transform: translateY(-200vh);
@@ -229,7 +238,7 @@
       background-position: 50%;
       background-size: cover;
       border-radius: 90px;
-      background-color: rgba(255, 255, 255, 0.8);
+      background-color: rgba(255, 255, 255, .8);
       box-shadow: var(--b3-point-shadow);
       border: 1px solid var(--b3-theme-surface-lighter);
     }
@@ -315,7 +324,7 @@
     }
 
     &[disabled] {
-      opacity: 0.38;
+      opacity: .38;
     }
 
     &.protyle-toolbar__item--current svg {
@@ -364,6 +373,8 @@
       box-shadow: inset 0 0 0 .6px var(--b3-theme-on-surface);
       border: 0;
       color: var(--b3-theme-on-background);
+      min-height: 50px;
+      text-align: left;
     }
 
     &-icon {
@@ -377,7 +388,6 @@
     }
 
     &-text {
-      line-height: 48px;
       margin-left: 6px;
     }
   }
@@ -390,6 +400,7 @@
   stroke: currentColor;
   width: 14px;
   height: 14px;
+  flex-shrink: 0;
 
   &--mid {
     width: 16px;
@@ -399,6 +410,11 @@
   &--small {
     width: 12px;
     height: 12px;
+  }
+
+  &--smaller {
+    width: 10px;
+    height: 10px;
   }
 }
 
@@ -417,6 +433,14 @@
 .b3-menu {
   &__accelerator {
     display: none;
+  }
+
+  &__item--warning {
+    color: var(--b3-theme-error);
+
+    & > .b3-menu__icon {
+      color: var(--b3-theme-error);
+    }
   }
 }
 
@@ -443,16 +467,10 @@
   box-sizing: border-box;
   background-color: var(--b3-theme-background);
   @extend .fn__ellipsis;
+  z-index: 2;
 }
 
 .protyle {
-  &-util {
-    .color__square {
-      height: 24px;
-      width: 24px;
-    }
-  }
-
   &-font {
     font-size: 14px;
   }
@@ -468,18 +486,14 @@
   &-background__img img {
     height: 200px;
   }
+
+  &-scroll {
+    right: 0;
+  }
 }
 
-html .protyle-wysiwyg [data-node-id]:last-child [spellcheck][contenteditable="true"]:empty:before {
-  content: "Enter text";
-  color: var(--b3-empty-color);
-}
-
-html[lang="zh_CN"] .protyle-wysiwyg [data-node-id]:last-child [spellcheck][contenteditable="true"]:empty:before {
-  content: "键入文字";
-}
-
-.av__views .block__icon {
+.av__views .block__icon,
+.av__row--footer .av__calc {
   opacity: 1;
 }
 
