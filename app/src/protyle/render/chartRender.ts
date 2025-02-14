@@ -18,24 +18,17 @@ export const chartRender = (element: Element, cdn = Constants.PROTYLE_CDN) => {
     if (echartsElements.length > 0) {
         addScript(`${cdn}/js/echarts/echarts.min.js?v=5.3.2`, "protyleEchartsScript").then(() => {
             addScript(`${cdn}/js/echarts/echarts-gl.min.js?v=2.0.9`, "protyleEchartsGLScript").then(() => {
+                const wysiswgElement = hasClosestByClassName(element, "protyle-wysiwyg", true);
                 let width: number = undefined;
-                if (echartsElements[0].firstElementChild.clientWidth === 0) {
-                    const tabElement = hasClosestByClassName(echartsElements[0], "layout-tab-container", true);
-                    if (tabElement) {
-                        Array.from(tabElement.children).find(item => {
-                            if (item.classList.contains("protyle") && !item.classList.contains("fn__none")) {
-                                width = item.querySelector(".protyle-wysiwyg").firstElementChild.clientWidth;
-                                return true;
-                            }
-                        });
-                    }
+                if (wysiswgElement && wysiswgElement.clientWidth > 0 && echartsElements[0].firstElementChild.clientWidth === 0 && wysiswgElement.firstElementChild) {
+                    width = wysiswgElement.firstElementChild.clientWidth;
                 }
                 echartsElements.forEach(async (e: HTMLDivElement) => {
                     if (e.getAttribute("data-render") === "true") {
                         return;
                     }
                     if (!e.firstElementChild.classList.contains("protyle-icons")) {
-                        e.insertAdjacentHTML("afterbegin", genIconHTML());
+                        e.insertAdjacentHTML("afterbegin", genIconHTML(wysiswgElement));
                     }
                     const renderElement = e.firstElementChild.nextElementSibling as HTMLElement;
                     try {

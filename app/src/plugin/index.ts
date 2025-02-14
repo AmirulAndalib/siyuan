@@ -14,6 +14,8 @@ import {MobileCustom} from "../mobile/dock/MobileCustom";
 import {hasClosestByAttribute} from "../protyle/util/hasClosest";
 import {BlockPanel} from "../block/Panel";
 import {Setting} from "./Setting";
+import {clearOBG} from "../layout/dock/util";
+import {Constants} from "../constants";
 
 export class Plugin {
     private app: App;
@@ -26,7 +28,7 @@ export class Plugin {
         filter: string[],
         html: string,
         id: string,
-        callback: (protyle: import("../protyle").Protyle) => void
+        callback: (protyle: import("../protyle").Protyle, nodeElement: HTMLElement) => void
     }[] = [];
     // TODO
     public customBlockRenders: {
@@ -56,7 +58,7 @@ export class Plugin {
             /// #endif
         }
     } = {};
-    private protyleOptionsValue: IOptions;
+    private protyleOptionsValue: IProtyleOptions;
 
     constructor(options: {
         app: App,
@@ -73,6 +75,29 @@ export class Plugin {
         Object.defineProperty(this, "name", {
             value: options.name,
             writable: false,
+        });
+
+        this.updateProtyleToolbar([]).forEach(toolbarItem => {
+            if (typeof toolbarItem === "string" || Constants.INLINE_TYPE.concat("|").includes(toolbarItem.name) || !toolbarItem.hotkey) {
+                return;
+            }
+            if (!window.siyuan.config.keymap.plugin) {
+                window.siyuan.config.keymap.plugin = {};
+            }
+            if (!window.siyuan.config.keymap.plugin[options.name]) {
+                window.siyuan.config.keymap.plugin[options.name] = {
+                    [toolbarItem.name]: {
+                        default: toolbarItem.hotkey,
+                        custom: toolbarItem.hotkey,
+                    }
+                };
+            }
+            if (!window.siyuan.config.keymap.plugin[options.name][toolbarItem.name]) {
+                window.siyuan.config.keymap.plugin[options.name][toolbarItem.name] = {
+                    default: toolbarItem.hotkey,
+                    custom: toolbarItem.hotkey,
+                };
+            }
         });
     }
 
@@ -97,7 +122,36 @@ export class Plugin {
     }
 
     public addCommand(command: ICommand) {
-        this.commands.push(command);
+        if (!window.siyuan.config.keymap.plugin) {
+            window.siyuan.config.keymap.plugin = {};
+        }
+        if (!window.siyuan.config.keymap.plugin[this.name]) {
+            command.customHotkey = command.hotkey;
+            window.siyuan.config.keymap.plugin[this.name] = {
+                [command.langKey]: {
+                    default: command.hotkey,
+                    custom: command.hotkey,
+                }
+            };
+        } else if (!window.siyuan.config.keymap.plugin[this.name][command.langKey]) {
+            command.customHotkey = command.hotkey;
+            window.siyuan.config.keymap.plugin[this.name][command.langKey] = {
+                default: command.hotkey,
+                custom: command.hotkey,
+            };
+        } else if (window.siyuan.config.keymap.plugin[this.name][command.langKey]) {
+            if (typeof window.siyuan.config.keymap.plugin[this.name][command.langKey].custom === "string") {
+                command.customHotkey = window.siyuan.config.keymap.plugin[this.name][command.langKey].custom;
+            } else {
+                command.customHotkey = command.hotkey;
+            }
+            window.siyuan.config.keymap.plugin[this.name][command.langKey]["default"] = command.hotkey;
+        }
+        if (typeof command.customHotkey !== "string") {
+            console.error(`${this.name} - commands data is error and has been removed.`);
+        } else {
+            this.commands.push(command);
+        }
     }
 
     public addIcons(svg: string) {
@@ -239,6 +293,7 @@ export class Plugin {
                 update: options.update,
             });
             customObj.element.addEventListener("click", () => {
+                clearOBG();
                 setPanelFocus(customObj.element.parentElement.parentElement);
             });
             return customObj;
@@ -297,15 +352,38 @@ export class Plugin {
             }
             /// #endif
         };
+        if (!window.siyuan.config.keymap.plugin) {
+            window.siyuan.config.keymap.plugin = {};
+        }
+        if (options.config.hotkey) {
+            if (!window.siyuan.config.keymap.plugin[this.name]) {
+                window.siyuan.config.keymap.plugin[this.name] = {
+                    [type2]: {
+                        default: options.config.hotkey,
+                        custom: options.config.hotkey,
+                    }
+                };
+            } else if (!window.siyuan.config.keymap.plugin[this.name][type2]) {
+                window.siyuan.config.keymap.plugin[this.name][type2] = {
+                    default: options.config.hotkey,
+                    custom: options.config.hotkey,
+                };
+            } else if (window.siyuan.config.keymap.plugin[this.name][type2]) {
+                if (typeof window.siyuan.config.keymap.plugin[this.name][type2].custom !== "string") {
+                    window.siyuan.config.keymap.plugin[this.name][type2].custom = options.config.hotkey;
+                }
+                window.siyuan.config.keymap.plugin[this.name][type2]["default"] = options.config.hotkey;
+            }
+        }
         return this.docks[type2];
     }
 
     public addFloatLayer = (options: {
-        ids: string[],
-        defIds?: string[],
+        refDefs: IRefDefs[],
         x?: number,
         y?: number,
         targetElement?: HTMLElement,
+        originalRefBlockIDs?: IObject,
         isBacklink: boolean,
     }) => {
         window.siyuan.blockPanels.push(new BlockPanel({
@@ -314,12 +392,15 @@ export class Plugin {
             isBacklink: options.isBacklink,
             x: options.x,
             y: options.y,
-            nodeIds: options.ids,
-            defIds: options.defIds,
+            refDefs: options.refDefs,
         }));
     };
 
-    set protyleOptions(options: IOptions) {
+    public updateProtyleToolbar(toolbar: Array<string | IMenuItem>) {
+        return toolbar;
+    }
+
+    set protyleOptions(options: IProtyleOptions) {
         this.protyleOptionsValue = options;
     }
 
