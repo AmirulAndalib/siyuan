@@ -87,7 +87,7 @@ export class Tag extends Model {
                         return;
                     }
                 }
-                openGlobalSearch(app, `#${element.getAttribute("data-label")}#`, !window.siyuan.ctrlIsPressed);
+                openGlobalSearch(app, `#${element.getAttribute("data-label")}#`, !window.siyuan.ctrlIsPressed, {method: 0});
             },
             rightClick: (element: HTMLElement, event: MouseEvent) => {
                 openTagMenu(element, event, element.getAttribute("data-label"));
@@ -110,7 +110,7 @@ export class Tag extends Model {
                     const type = target.getAttribute("data-type");
                     switch (type) {
                         case "min":
-                            getDockByType("tag").toggleModel("tag");
+                            getDockByType("tag").toggleModel("tag", false, true);
                             break;
                         case "sort":
                             window.siyuan.menus.menu.remove();
