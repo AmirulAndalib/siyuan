@@ -8,6 +8,9 @@ import {isBrowser} from "../util/functions";
 import {showMessage} from "../dialog/message";
 import {showFileInFolder} from "../util/pathName";
 import {Constants} from "../constants";
+import {openByMobile} from "../protyle/util/compatibility";
+import {exportLayout} from "../layout/util";
+import {exitSiYuan} from "../dialog/processSystem";
 
 export const exportConfig = {
     element: undefined as Element,
@@ -88,12 +91,15 @@ export const exportConfig = {
     <textarea class="b3-text-field fn__block" id="pdfWatermarkDesc"></textarea>
 </div>
 <div class="b3-label config__item">
-    ${window.siyuan.languages.export9}
+    ${window.siyuan.languages.export30}
     <div class="b3-label__text">${window.siyuan.languages.export28}</div>
     <div class="fn__hr"></div>
     <input class="b3-text-field fn__block" id="imageWatermarkStr">
     <div class="fn__hr"></div>
-    <div class="b3-label__text">${window.siyuan.languages.export29}</div>
+    <div class="b3-label__text">    
+        ${window.siyuan.languages.export29}<br>
+        ${window.siyuan.languages.export10}
+    </div>
     <div class="fn__hr"></div>
     <textarea class="b3-text-field fn__block" id="imageWatermarkDesc"></textarea>
 </div>
@@ -154,6 +160,27 @@ export const exportConfig = {
         <input id="importData" class="b3-form__upload" type="file">
         <svg><use xlink:href="#iconDownload"></use></svg>${window.siyuan.languages.import}
     </button>
+</div>
+<div class="fn__flex b3-label config__item">
+    <div class="fn__flex-1 fn__flex-center">
+        ${window.siyuan.languages.exportConf}
+        <div class="b3-label__text">${window.siyuan.languages.exportConfTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <button class="b3-button b3-button--outline fn__flex-center fn__size200" id="exportConf">
+        <svg><use xlink:href="#iconUpload"></use></svg>${window.siyuan.languages.export}
+    </button>
+</div>
+<div class="fn__flex b3-label config__item">
+    <div class="fn__flex-1 fn__flex-center">
+        ${window.siyuan.languages.importConf}
+        <div class="b3-label__text">${window.siyuan.languages.importConfTip}</div>
+    </div>
+    <span class="fn__space"></span>
+    <button class="b3-button b3-button--outline fn__flex-center fn__size200" style="position: relative">
+        <input id="importConf" class="b3-form__upload" type="file">
+        <svg><use xlink:href="#iconDownload"></use></svg>${window.siyuan.languages.import}
+    </button>
 </div>`;
     },
     bindEvent: () => {
@@ -204,6 +231,23 @@ export const exportConfig = {
                     formData.append("file", event.target.files[0]);
                     fetchPost("/api/import/importData", formData);
                 });
+            } else if (item.id === "importConf") {
+                item.addEventListener("change", (event: InputEvent & { target: HTMLInputElement }) => {
+                    const formData = new FormData();
+                    formData.append("file", event.target.files[0]);
+                    fetchPost("/api/system/importConf", formData, response => {
+                        if (response.code !== 0) {
+                            showMessage(response.msg);
+                            return;
+                        }
+
+                        showMessage(window.siyuan.languages.imported);
+                        exportLayout({
+                            errorExit: true,
+                            cb: exitSiYuan
+                        });
+                    });
+                });
             } else {
                 item.addEventListener("change", () => {
                     setexprt();
@@ -213,7 +257,7 @@ export const exportConfig = {
         exportConfig.element.querySelector("#exportData").addEventListener("click", async () => {
             /// #if BROWSER
             fetchPost("/api/export/exportData", {}, response => {
-                window.location.href = response.data.zip;
+                openByMobile(response.data.zip);
             });
             /// #else
             const result = await ipcRenderer.invoke(Constants.SIYUAN_GET, {
@@ -231,6 +275,11 @@ export const exportConfig = {
                 afterExport(path.join(result.filePaths[0], response.data.name), msgId);
             });
             /// #endif
+        });
+        exportConfig.element.querySelector("#exportConf").addEventListener("click", async () => {
+            fetchPost("/api/system/exportConf", {}, response => {
+                openByMobile(response.data.zip);
+            });
         });
         /// #if !BROWSER
         pandocBinPathElement.addEventListener("click", () => {
@@ -253,7 +302,7 @@ export const exportConfig = {
         });
         /// #endif
     },
-    onSetexport: (data: IExport) => {
+    onSetexport: (data: Config.IExport) => {
         window.siyuan.config.export = data;
     }
 };

@@ -25,7 +25,7 @@ export const genCardItem = (item: ICardPackage) => {
 <span data-type="view" class="b3-list-item__action b3-tooltips b3-tooltips__w" aria-label="${window.siyuan.languages.cardPreview}">
     <svg><use xlink:href="#iconEye"></use></svg>
 </span>
-<span data-type="remove" class="b3-list-item__action b3-tooltips b3-tooltips__w" aria-label="${window.siyuan.languages.removeDeck}">
+<span data-type="remove" class="b3-list-item__action b3-list-item__action--warning b3-tooltips b3-tooltips__w" aria-label="${window.siyuan.languages.removeDeck}">
     <svg><use xlink:href="#iconMin"></use></svg>
 </span>
 <span data-type="add" style="display: flex" class="b3-list-item__action b3-tooltips b3-tooltips__w" aria-label="${window.siyuan.languages.addDeck}">
@@ -112,13 +112,13 @@ export const makeCard = (app: App, ids: string[]) => {
                     event.preventDefault();
                     break;
                 } else if (type === "delete") {
-                    confirmDialog(window.siyuan.languages.confirm, `${window.siyuan.languages.confirmDelete} <b>${escapeHtml(target.parentElement.getAttribute("data-name"))}</b>?`, () => {
+                    confirmDialog(window.siyuan.languages.deleteOpConfirm, `${window.siyuan.languages.confirmDelete} <b>${escapeHtml(target.parentElement.getAttribute("data-name"))}</b>?`, () => {
                         fetchPost("/api/riff/removeRiffDeck", {
                             deckID: target.parentElement.getAttribute("data-id"),
                         }, () => {
                             target.parentElement.remove();
                         });
-                    });
+                    }, undefined, true);
                     event.stopPropagation();
                     event.preventDefault();
                     break;
