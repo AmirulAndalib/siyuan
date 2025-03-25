@@ -23,12 +23,167 @@ import (
 	"github.com/88250/gulu"
 	"github.com/88250/lute"
 	"github.com/88250/lute/ast"
+	"github.com/88250/lute/parse"
 	"github.com/gin-gonic/gin"
 	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+func moveOutlineHeading(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	id := arg["id"].(string)
+	if util.InvalidIDPattern(id, ret) {
+		return
+	}
+
+	var parentID, previousID string
+	if nil != arg["parentID"] {
+		parentID = arg["parentID"].(string)
+		if "" != parentID && util.InvalidIDPattern(parentID, ret) {
+			return
+		}
+	}
+	if nil != arg["previousID"] {
+		previousID = arg["previousID"].(string)
+		if "" != previousID && util.InvalidIDPattern(previousID, ret) {
+			return
+		}
+	}
+
+	transactions := []*model.Transaction{
+		{
+			DoOperations: []*model.Operation{
+				{
+					Action:     "moveOutlineHeading",
+					ID:         id,
+					PreviousID: previousID,
+					ParentID:   parentID,
+				},
+			},
+		},
+	}
+
+	model.PerformTransactions(&transactions)
+	model.FlushTxQueue()
+
+	ret.Data = transactions
+	broadcastTransactions(transactions)
+}
+
+func appendDailyNoteBlock(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	data := arg["data"].(string)
+	dataType := arg["dataType"].(string)
+	boxID := arg["notebook"].(string)
+	if util.InvalidIDPattern(boxID, ret) {
+		return
+	}
+	if "markdown" == dataType {
+		luteEngine := util.NewLute()
+		var err error
+		data, err = dataBlockDOM(data, luteEngine)
+		if err != nil {
+			ret.Code = -1
+			ret.Msg = "data block DOM failed: " + err.Error()
+			return
+		}
+	}
+
+	p, _, err := model.CreateDailyNote(boxID)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = "create daily note failed: " + err.Error()
+		return
+	}
+
+	parentID := util.GetTreeID(p)
+	transactions := []*model.Transaction{
+		{
+			DoOperations: []*model.Operation{
+				{
+					Action:   "appendInsert",
+					Data:     data,
+					ParentID: parentID,
+				},
+			},
+		},
+	}
+
+	model.PerformTransactions(&transactions)
+	model.FlushTxQueue()
+
+	ret.Data = transactions
+	broadcastTransactions(transactions)
+}
+
+func prependDailyNoteBlock(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	data := arg["data"].(string)
+	dataType := arg["dataType"].(string)
+	boxID := arg["notebook"].(string)
+	if util.InvalidIDPattern(boxID, ret) {
+		return
+	}
+	if "markdown" == dataType {
+		luteEngine := util.NewLute()
+		var err error
+		data, err = dataBlockDOM(data, luteEngine)
+		if err != nil {
+			ret.Code = -1
+			ret.Msg = "data block DOM failed: " + err.Error()
+			return
+		}
+	}
+
+	p, _, err := model.CreateDailyNote(boxID)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = "create daily note failed: " + err.Error()
+		return
+	}
+
+	parentID := util.GetTreeID(p)
+	transactions := []*model.Transaction{
+		{
+			DoOperations: []*model.Operation{
+				{
+					Action:   "prependInsert",
+					Data:     data,
+					ParentID: parentID,
+				},
+			},
+		},
+	}
+
+	model.PerformTransactions(&transactions)
+	model.FlushTxQueue()
+
+	ret.Data = transactions
+	broadcastTransactions(transactions)
+}
 
 func unfoldBlock(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
@@ -70,7 +225,7 @@ func unfoldBlock(c *gin.Context) {
 			},
 		}
 	} else {
-		data, _ := gulu.JSON.MarshalJSON(map[string]interface{}{"unfold": "1"})
+		data, _ := gulu.JSON.MarshalJSON(map[string]interface{}{"fold": ""})
 		transactions = []*model.Transaction{
 			{
 				DoOperations: []*model.Operation{
@@ -85,7 +240,7 @@ func unfoldBlock(c *gin.Context) {
 	}
 
 	model.PerformTransactions(&transactions)
-	model.WaitForWritingFiles()
+	model.FlushTxQueue()
 
 	broadcastTransactions(transactions)
 }
@@ -145,7 +300,7 @@ func foldBlock(c *gin.Context) {
 	}
 
 	model.PerformTransactions(&transactions)
-	model.WaitForWritingFiles()
+	model.FlushTxQueue()
 
 	broadcastTransactions(transactions)
 }
@@ -167,13 +322,13 @@ func moveBlock(c *gin.Context) {
 	var parentID, previousID string
 	if nil != arg["parentID"] {
 		parentID = arg["parentID"].(string)
-		if util.InvalidIDPattern(parentID, ret) {
+		if "" != parentID && util.InvalidIDPattern(parentID, ret) {
 			return
 		}
 	}
 	if nil != arg["previousID"] {
 		previousID = arg["previousID"].(string)
-		if util.InvalidIDPattern(previousID, ret) {
+		if "" != previousID && util.InvalidIDPattern(previousID, ret) {
 			return
 		}
 
@@ -199,7 +354,7 @@ func moveBlock(c *gin.Context) {
 	}
 
 	model.PerformTransactions(&transactions)
-	model.WaitForWritingFiles()
+	model.FlushTxQueue()
 
 	ret.Data = transactions
 	broadcastTransactions(transactions)
@@ -224,7 +379,7 @@ func appendBlock(c *gin.Context) {
 		luteEngine := util.NewLute()
 		var err error
 		data, err = dataBlockDOM(data, luteEngine)
-		if nil != err {
+		if err != nil {
 			ret.Code = -1
 			ret.Msg = "data block DOM failed: " + err.Error()
 			return
@@ -244,7 +399,7 @@ func appendBlock(c *gin.Context) {
 	}
 
 	model.PerformTransactions(&transactions)
-	model.WaitForWritingFiles()
+	model.FlushTxQueue()
 
 	ret.Data = transactions
 	broadcastTransactions(transactions)
@@ -269,7 +424,7 @@ func prependBlock(c *gin.Context) {
 		luteEngine := util.NewLute()
 		var err error
 		data, err = dataBlockDOM(data, luteEngine)
-		if nil != err {
+		if err != nil {
 			ret.Code = -1
 			ret.Msg = "data block DOM failed: " + err.Error()
 			return
@@ -289,7 +444,7 @@ func prependBlock(c *gin.Context) {
 	}
 
 	model.PerformTransactions(&transactions)
-	model.WaitForWritingFiles()
+	model.FlushTxQueue()
 
 	ret.Data = transactions
 	broadcastTransactions(transactions)
@@ -309,19 +464,19 @@ func insertBlock(c *gin.Context) {
 	var parentID, previousID, nextID string
 	if nil != arg["parentID"] {
 		parentID = arg["parentID"].(string)
-		if util.InvalidIDPattern(parentID, ret) {
+		if "" != parentID && util.InvalidIDPattern(parentID, ret) {
 			return
 		}
 	}
 	if nil != arg["previousID"] {
 		previousID = arg["previousID"].(string)
-		if util.InvalidIDPattern(previousID, ret) {
+		if "" != previousID && util.InvalidIDPattern(previousID, ret) {
 			return
 		}
 	}
 	if nil != arg["nextID"] {
 		nextID = arg["nextID"].(string)
-		if util.InvalidIDPattern(nextID, ret) {
+		if "" != nextID && util.InvalidIDPattern(nextID, ret) {
 			return
 		}
 	}
@@ -330,7 +485,7 @@ func insertBlock(c *gin.Context) {
 		luteEngine := util.NewLute()
 		var err error
 		data, err = dataBlockDOM(data, luteEngine)
-		if nil != err {
+		if err != nil {
 			ret.Code = -1
 			ret.Msg = "data block DOM failed: " + err.Error()
 			return
@@ -352,7 +507,7 @@ func insertBlock(c *gin.Context) {
 	}
 
 	model.PerformTransactions(&transactions)
-	model.WaitForWritingFiles()
+	model.FlushTxQueue()
 
 	ret.Data = transactions
 	broadcastTransactions(transactions)
@@ -378,7 +533,7 @@ func updateBlock(c *gin.Context) {
 	if "markdown" == dataType {
 		var err error
 		data, err = dataBlockDOM(data, luteEngine)
-		if nil != err {
+		if err != nil {
 			ret.Code = -1
 			ret.Msg = "data block DOM failed: " + err.Error()
 			return
@@ -392,7 +547,7 @@ func updateBlock(c *gin.Context) {
 	}
 
 	block, err := model.GetBlock(id, nil)
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = "get block failed: " + err.Error()
 		return
@@ -401,7 +556,7 @@ func updateBlock(c *gin.Context) {
 	var transactions []*model.Transaction
 	if "NodeDocument" == block.Type {
 		oldTree, err := filesys.LoadTree(block.Box, block.Path, luteEngine)
-		if nil != err {
+		if err != nil {
 			ret.Code = -1
 			ret.Msg = "load tree failed: " + err.Error()
 			return
@@ -443,10 +598,124 @@ func updateBlock(c *gin.Context) {
 	}
 
 	model.PerformTransactions(&transactions)
-	model.WaitForWritingFiles()
+	model.FlushTxQueue()
 
 	ret.Data = transactions
 	broadcastTransactions(transactions)
+}
+
+func batchUpdateBlock(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	blocksArg := arg["blocks"].([]interface{})
+
+	type updateBlockArg struct {
+		ID       string
+		Data     string
+		DataType string
+		Block    *model.Block
+		Tree     *parse.Tree
+	}
+
+	var blocks []*updateBlockArg
+	luteEngine := util.NewLute()
+	for _, blockArg := range blocksArg {
+		blockMap := blockArg.(map[string]interface{})
+		id := blockMap["id"].(string)
+		if util.InvalidIDPattern(id, ret) {
+			return
+		}
+
+		data := blockMap["data"].(string)
+		dataType := blockMap["dataType"].(string)
+		if "markdown" == dataType {
+			var err error
+			data, err = dataBlockDOM(data, luteEngine)
+			if err != nil {
+				ret.Code = -1
+				ret.Msg = "data block DOM failed: " + err.Error()
+				return
+			}
+		}
+		tree := luteEngine.BlockDOM2Tree(data)
+		if nil == tree || nil == tree.Root || nil == tree.Root.FirstChild {
+			ret.Code = -1
+			ret.Msg = "parse tree failed"
+			return
+		}
+
+		block, err := model.GetBlock(id, nil)
+		if err != nil {
+			ret.Code = -1
+			ret.Msg = "get block failed: " + err.Error()
+			return
+		}
+
+		blocks = append(blocks, &updateBlockArg{
+			ID:       id,
+			Data:     data,
+			DataType: dataType,
+			Block:    block,
+			Tree:     tree,
+		})
+	}
+
+	var ops []*model.Operation
+	tx := &model.Transaction{}
+	transactions := []*model.Transaction{tx}
+	for _, upBlock := range blocks {
+		block := upBlock.Block
+		data := upBlock.Data
+		tree := upBlock.Tree
+		id := upBlock.ID
+		if "NodeDocument" == block.Type {
+			oldTree, err := filesys.LoadTree(block.Box, block.Path, luteEngine)
+			if err != nil {
+				ret.Code = -1
+				ret.Msg = "load tree failed: " + err.Error()
+				return
+			}
+			var toRemoves []*ast.Node
+
+			for n := oldTree.Root.FirstChild; nil != n; n = n.Next {
+				toRemoves = append(toRemoves, n)
+				ops = append(ops, &model.Operation{Action: "delete", ID: n.ID})
+			}
+			for _, n := range toRemoves {
+				n.Unlink()
+			}
+			ops = append(ops, &model.Operation{Action: "appendInsert", Data: data, ParentID: id})
+		} else {
+			if "NodeListItem" == block.Type && ast.NodeList == tree.Root.FirstChild.Type {
+				// 使用 API `api/block/updateBlock` 更新列表项时渲染错误 https://github.com/siyuan-note/siyuan/issues/4658
+				tree.Root.AppendChild(tree.Root.FirstChild.FirstChild) // 将列表下的第一个列表项移到文档结尾，移动以后根下面直接挂列表项，渲染器可以正常工作
+				tree.Root.FirstChild.Unlink()                          // 删除列表
+				tree.Root.FirstChild.Unlink()                          // 继续删除列表 IAL
+			}
+			tree.Root.FirstChild.SetIALAttr("id", id)
+
+			data = luteEngine.Tree2BlockDOM(tree, luteEngine.RenderOptions)
+			ops = append(ops, &model.Operation{
+				Action: "update",
+				ID:     id,
+				Data:   data,
+			})
+		}
+	}
+
+	tx.DoOperations = ops
+	model.PerformTransactions(&transactions)
+	model.FlushTxQueue()
+
+	ret.Data = transactions
+	broadcastTransactions(transactions)
+
 }
 
 func deleteBlock(c *gin.Context) {
@@ -492,7 +761,7 @@ func dataBlockDOM(data string, luteEngine *lute.Lute) (ret string, err error) {
 	ret, tree := luteEngine.Md2BlockDOMTree(data, true)
 	if "" == ret {
 		// 使用 API 插入空字符串出现错误 https://github.com/siyuan-note/siyuan/issues/3931
-		blankParagraph := treenode.NewParagraph()
+		blankParagraph := treenode.NewParagraph("")
 		ret = luteEngine.RenderNodeBlockDOM(blankParagraph)
 	}
 

@@ -1,5 +1,6 @@
 import {popSearch} from "./search";
 import {initAppearance} from "../settings/appearance";
+import {initAssets} from "../settings/assets";
 import {closePanel} from "../util/closePanel";
 import {mountHelp, newDailyNote, newNotebook} from "../../util/mount";
 import {repos} from "../../config/repos";
@@ -16,11 +17,19 @@ import {initAbout} from "../settings/about";
 import {getRecentDocs} from "./getRecentDocs";
 import {initEditor} from "../settings/editor";
 import {App} from "../../index";
-import {isHuawei, isInAndroid, isInIOS} from "../../protyle/util/compatibility";
+import {
+    isDisabledFeature,
+    isHuawei,
+    isInAndroid,
+    isInHarmony,
+    isInIOS,
+    isIPhone
+} from "../../protyle/util/compatibility";
 import {newFile} from "../../util/newFile";
 import {afterLoadPlugin} from "../../plugin/loader";
-import {Menu} from "../../plugin/Menu";
-import {commandPanel} from "../../plugin/commandPanel";
+import {commandPanel} from "../../boot/globalEvent/command/panel";
+import {openTopBarMenu} from "../../plugin/openTopBarMenu";
+import {initFileTree} from "../settings/fileTree";
 
 export const popMenu = () => {
     activeBlur();
@@ -45,8 +54,9 @@ export const initRightMenu = (app: App) => {
     let aiHTML = `<div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuAI">
         <svg class="b3-menu__icon"><use xlink:href="#iconSparkles"></use></svg><span class="b3-menu__label">AI</span>
     </div>`;
-    if (isHuawei()) {
+    if (isHuawei() || isDisabledFeature("ai")) {
         // Access to the OpenAI API is no longer supported on Huawei devices https://github.com/siyuan-note/siyuan/issues/8192
+        // Apps in Chinese mainland app stores no longer provide AI access settings https://github.com/siyuan-note/siyuan/issues/13051
         aiHTML = "";
     }
 
@@ -61,6 +71,9 @@ export const initRightMenu = (app: App) => {
     </div>
     <div id="menuSearch" class="b3-menu__item">
         <svg class="b3-menu__icon"><use xlink:href="#iconSearch"></use></svg><span class="b3-menu__label">${window.siyuan.languages.search}</span>
+    </div>
+    <div id="menuCommand" class="b3-menu__item">
+        <svg class="b3-menu__icon"><use xlink:href="#iconTerminal"></use></svg><span class="b3-menu__label">${window.siyuan.languages.commandPanel}</span>
     </div>
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuSyncNow">
         <svg class="b3-menu__icon"><use xlink:href="#iconCloudSucc"></use></svg><span class="b3-menu__label">${window.siyuan.languages.syncNow}</span>
@@ -84,17 +97,24 @@ export const initRightMenu = (app: App) => {
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuHistory">
         <svg class="b3-menu__icon"><use xlink:href="#iconHistory"></use></svg><span class="b3-menu__label">${window.siyuan.languages.dataHistory}</span>
     </div>
-    <div class="b3-menu__item${(isInAndroid() || isInIOS()) ? "" : " fn__none"}" id="menuSafeQuit">
+    <div class="b3-menu__separator${(isInAndroid() || isInIOS() || isInHarmony()) ? "" : " fn__none"}"></div>
+    <div class="b3-menu__item b3-menu__item--warning${(isInAndroid() || isInIOS() || isInHarmony()) ? "" : " fn__none"}" id="menuSafeQuit">
         <svg class="b3-menu__icon"><use xlink:href="#iconQuit"></use></svg><span class="b3-menu__label">${window.siyuan.languages.safeQuit}</span>
     </div>
     <div class="b3-menu__separator"></div>
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuEditor">
         <svg class="b3-menu__icon"><use xlink:href="#iconEdit"></use></svg><span class="b3-menu__label">${window.siyuan.languages.editor}</span>
     </div>
+    <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuFileTree">
+        <svg class="b3-menu__icon"><use xlink:href="#iconFiles"></use></svg><span class="b3-menu__label">${window.siyuan.languages.fileTree}</span>
+    </div>
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuRiffCard">
         <svg class="b3-menu__icon"><use xlink:href="#iconRiffCard"></use></svg><span class="b3-menu__label">${window.siyuan.languages.riffCard}</span>
     </div>
     ${aiHTML}
+    <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuAssets">
+        <svg class="b3-menu__icon"><use xlink:href="#iconImage"></use></svg><span class="b3-menu__label">${window.siyuan.languages.assets}</span>
+    </div>
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuAppearance">
         <svg class="b3-menu__icon"><use xlink:href="#iconTheme"></use></svg><span class="b3-menu__label">${window.siyuan.languages.appearance}</span>
     </div>
@@ -108,8 +128,8 @@ export const initRightMenu = (app: App) => {
         <svg class="b3-menu__icon"><use xlink:href="#iconPlugin"></use></svg><span class="b3-menu__label">${window.siyuan.languages.plugin}</span>
     </div>
     <div class="b3-menu__separator"></div>
-    <div class="b3-menu__item" id="menuHelp">
-        <svg class="b3-menu__icon"><use xlink:href="#iconHelp"></use></svg><span class="b3-menu__label">${window.siyuan.languages.help}</span>
+    <div class="b3-menu__item${(isIPhone() || window.siyuan.config.readonly) ? " fn__none" : ""}" id="menuHelp">
+        <svg class="b3-menu__icon"><use xlink:href="#iconHelp"></use></svg><span class="b3-menu__label">${window.siyuan.languages.userGuide}</span>
     </div>
     <a class="b3-menu__item" href="${"zh_CN" === window.siyuan.config.lang || "zh_CHT" === window.siyuan.config.lang ? "https://ld246.com/article/1649901726096" : "https://liuyun.io/article/1686530886208"}" target="_blank">
         <svg class="b3-menu__icon"><use xlink:href="#iconFeedback"></use></svg>
@@ -117,14 +137,8 @@ export const initRightMenu = (app: App) => {
     </a>
 </div>`;
     processSync();
-    const unPinsMenu: IMenu[] = [];
     app.plugins.forEach(item => {
-        const unPinMenu = afterLoadPlugin(item);
-        if (unPinMenu) {
-            unPinMenu.forEach(unpinItem => {
-                unPinsMenu.push(unpinItem);
-            });
-        }
+        afterLoadPlugin(item);
     });
     // 只能用 click，否则无法上下滚动 https://github.com/siyuan-note/siyuan/issues/6628
     menuElement.addEventListener("click", (event) => {
@@ -132,6 +146,12 @@ export const initRightMenu = (app: App) => {
         while (target && !target.isEqualNode(menuElement)) {
             if (target.classList.contains("b3-menu__title")) {
                 closePanel();
+                event.preventDefault();
+                event.stopPropagation();
+                break;
+            } else if (target.id === "menuCommand") {
+                closePanel();
+                commandPanel(app);
                 event.preventDefault();
                 event.stopPropagation();
                 break;
@@ -150,6 +170,11 @@ export const initRightMenu = (app: App) => {
                 event.preventDefault();
                 event.stopPropagation();
                 break;
+            } else if (target.id === "menuAssets") {
+                initAssets();
+                event.preventDefault();
+                event.stopPropagation();
+                break;
             } else if (target.id === "menuAI") {
                 initAI();
                 event.preventDefault();
@@ -165,10 +190,15 @@ export const initRightMenu = (app: App) => {
                 event.preventDefault();
                 event.stopPropagation();
                 break;
-            } else if (target.id === "menuSafeQuit") {
-                exitSiYuan();
+            } else if (target.id === "menuFileTree") {
+                initFileTree();
                 event.preventDefault();
                 event.stopPropagation();
+                break;
+            } else if (target.id === "menuSafeQuit") {
+                event.preventDefault();
+                event.stopPropagation();
+                exitSiYuan();
                 break;
             } else if (target.id === "menuAbout") {
                 initAbout();
@@ -176,21 +206,7 @@ export const initRightMenu = (app: App) => {
                 event.stopPropagation();
                 break;
             } else if (target.id === "menuPlugin") {
-                const menu = new Menu();
-                menu.addItem({
-                    icon: "iconLayoutBottom",
-                    label: window.siyuan.languages.commandPanel,
-                    click() {
-                        commandPanel(app);
-                    }
-                });
-                if (unPinsMenu.length > 0) {
-                    menu.addSeparator();
-                }
-                unPinsMenu.forEach(item => {
-                    menu.addItem(item);
-                });
-                menu.fullscreen();
+                openTopBarMenu(app);
                 event.preventDefault();
                 event.stopPropagation();
                 break;
