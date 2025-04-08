@@ -22,9 +22,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/88250/gulu"
 	"github.com/88250/lute/ast"
 	"github.com/emirpasic/gods/sets/hashset"
-	"github.com/facette/natsort"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/search"
 	"github.com/siyuan-note/siyuan/kernel/sql"
@@ -50,9 +50,11 @@ func RemoveTag(label string) (err error) {
 		}
 	}
 
+	var reloadTreeIDs []string
+	updateNodes := map[string]*ast.Node{}
 	for treeID, blocks := range treeBlocks {
 		util.PushEndlessProgress("[" + treeID + "]")
-		tree, e := loadTreeByBlockID(treeID)
+		tree, e := LoadTreeByBlockID(treeID)
 		if nil != e {
 			util.ClearPushProgress(100)
 			return e
@@ -88,19 +90,32 @@ func RemoveTag(label string) (err error) {
 					}
 				}
 			}
+
+			updateNodes[node.ID] = node
 		}
 		for _, n := range unlinks {
 			n.Unlink()
 		}
 		util.PushEndlessProgress(fmt.Sprintf(Conf.Language(111), util.EscapeHTML(tree.Root.IALAttr("title"))))
-		if err = writeJSONQueue(tree); nil != err {
+		if err = writeTreeUpsertQueue(tree); err != nil {
 			util.ClearPushProgress(100)
 			return
 		}
 		util.RandomSleep(50, 150)
+		reloadTreeIDs = append(reloadTreeIDs, tree.ID)
 	}
 
-	util.ReloadUI()
+	sql.FlushQueue()
+
+	reloadTreeIDs = gulu.Str.RemoveDuplicatedElem(reloadTreeIDs)
+	for _, id := range reloadTreeIDs {
+		ReloadProtyle(id)
+	}
+
+	updateAttributeViewBlockText(updateNodes)
+
+	sql.FlushQueue()
+	util.PushClearProgress()
 	return
 }
 
@@ -135,9 +150,12 @@ func RenameTag(oldLabel, newLabel string) (err error) {
 		}
 	}
 
+	var reloadTreeIDs []string
+	updateNodes := map[string]*ast.Node{}
+
 	for treeID, blocks := range treeBlocks {
 		util.PushEndlessProgress("[" + treeID + "]")
-		tree, e := loadTreeByBlockID(treeID)
+		tree, e := LoadTreeByBlockID(treeID)
 		if nil != e {
 			util.ClearPushProgress(100)
 			return e
@@ -174,16 +192,29 @@ func RenameTag(oldLabel, newLabel string) (err error) {
 					}
 				}
 			}
+
+			updateNodes[node.ID] = node
 		}
 		util.PushEndlessProgress(fmt.Sprintf(Conf.Language(111), util.EscapeHTML(tree.Root.IALAttr("title"))))
-		if err = writeJSONQueue(tree); nil != err {
+		if err = writeTreeUpsertQueue(tree); err != nil {
 			util.ClearPushProgress(100)
 			return
 		}
 		util.RandomSleep(50, 150)
+		reloadTreeIDs = append(reloadTreeIDs, tree.ID)
 	}
 
-	util.ReloadUI()
+	sql.FlushQueue()
+
+	reloadTreeIDs = gulu.Str.RemoveDuplicatedElem(reloadTreeIDs)
+	for _, id := range reloadTreeIDs {
+		ReloadProtyle(id)
+	}
+
+	updateAttributeViewBlockText(updateNodes)
+
+	sql.FlushQueue()
+	util.PushClearProgress()
 	return
 }
 
@@ -207,40 +238,57 @@ type Tag struct {
 type Tags []*Tag
 
 func BuildTags() (ret *Tags) {
-	WaitForWritingFiles()
-	if !sql.IsEmptyQueue() {
-		sql.WaitForWritingDatabase()
-	}
+	FlushTxQueue()
+	sql.FlushQueue()
 
 	ret = &Tags{}
 	labels := labelTags()
 	tags := Tags{}
-	for label, _ := range labels {
+	for label := range labels {
 		tags = buildTags(tags, strings.Split(label, "/"), 0)
 	}
 	appendTagChildren(&tags, labels)
 	sortTags(tags)
-	ret = &tags
+
+	var total int
+	tmp := &Tags{}
+	for _, tag := range tags {
+		*tmp = append(*tmp, tag)
+		countTag(tag, &total)
+		if Conf.FileTree.MaxListCount < total {
+			util.PushMsg(fmt.Sprintf(Conf.Language(243), Conf.FileTree.MaxListCount), 7000)
+			break
+		}
+	}
+
+	ret = tmp
 	return
+}
+
+func countTag(tag *Tag, total *int) {
+	*total += 1
+	for _, child := range tag.tags {
+		countTag(child, total)
+	}
 }
 
 func sortTags(tags Tags) {
 	switch Conf.Tag.Sort {
 	case util.SortModeNameASC:
 		sort.Slice(tags, func(i, j int) bool {
-			return util.PinYinCompare(util.RemoveEmojiInvisible(tags[i].Name), util.RemoveEmojiInvisible(tags[j].Name))
+			return util.PinYinCompare(tags[i].Name, tags[j].Name)
 		})
 	case util.SortModeNameDESC:
 		sort.Slice(tags, func(j, i int) bool {
-			return util.PinYinCompare(util.RemoveEmojiInvisible(tags[i].Name), util.RemoveEmojiInvisible(tags[j].Name))
+			return util.PinYinCompare(tags[i].Name, tags[j].Name)
 		})
 	case util.SortModeAlphanumASC:
 		sort.Slice(tags, func(i, j int) bool {
-			return natsort.Compare(util.RemoveEmojiInvisible((tags)[i].Name), util.RemoveEmojiInvisible((tags)[j].Name))
+			return util.NaturalCompare((tags)[i].Name, (tags)[j].Name)
 		})
 	case util.SortModeAlphanumDESC:
 		sort.Slice(tags, func(i, j int) bool {
-			return natsort.Compare(util.RemoveEmojiInvisible((tags)[j].Name), util.RemoveEmojiInvisible((tags)[i].Name))
+			return util.NaturalCompare((tags)[j].Name, (tags)[i].Name)
 		})
 	case util.SortModeRefCountASC:
 		sort.Slice(tags, func(i, j int) bool { return (tags)[i].Count < (tags)[j].Count })
@@ -248,7 +296,7 @@ func sortTags(tags Tags) {
 		sort.Slice(tags, func(i, j int) bool { return (tags)[i].Count > (tags)[j].Count })
 	default:
 		sort.Slice(tags, func(i, j int) bool {
-			return natsort.Compare(util.RemoveEmojiInvisible((tags)[i].Name), util.RemoveEmojiInvisible((tags)[j].Name))
+			return util.NaturalCompare((tags)[i].Name, (tags)[j].Name)
 		})
 	}
 }
@@ -258,7 +306,7 @@ func SearchTags(keyword string) (ret []string) {
 	defer logging.Recover() // 定位 无法添加题头图标签 https://github.com/siyuan-note/siyuan/issues/6756
 
 	labels := labelBlocksByKeyword(keyword)
-	for label, _ := range labels {
+	for label := range labels {
 		_, t := search.MarkText(label, keyword, 1024, Conf.Search.CaseSensitive)
 		ret = append(ret, t)
 	}
@@ -312,7 +360,7 @@ func labelTags() (ret map[string]Tags) {
 
 	tagSpans := sql.QueryTagSpans("")
 	for _, tagSpan := range tagSpans {
-		label := tagSpan.Content
+		label := util.UnescapeHTML(tagSpan.Content)
 		if _, ok := ret[label]; ok {
 			ret[label] = append(ret[label], &Tag{})
 		} else {

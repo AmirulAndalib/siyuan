@@ -25,17 +25,17 @@ import {loadPlugins} from "../plugin/loader";
 import {saveScroll} from "../protyle/scroll/saveScroll";
 import {removeBlock} from "../protyle/wysiwyg/remove";
 import {isNotEditBlock} from "../protyle/wysiwyg/getBlock";
+import {updateCardHV} from "../card/util";
+import {mobileKeydown} from "./util/keydown";
+import {correctHotkey} from "../boot/globalEvent/commonHotkey";
+import {processIOSPurchaseResponse} from "../util/iOSPurchase";
 
 class App {
     public plugins: import("../plugin").Plugin[] = [];
     public appId: string;
 
     constructor() {
-        if (!window.webkit?.messageHandlers && !window.JSAndroid) {
-            registerServiceWorker(`${Constants.SERVICE_WORKER_PATH}?v=${Constants.SIYUAN_VERSION}`);
-        }
-        addScriptSync(`${Constants.PROTYLE_CDN}/js/lute/lute.min.js?v=${Constants.SIYUAN_VERSION}`, "protyleLuteScript");
-        addScript(`${Constants.PROTYLE_CDN}/js/protyle-html.js?v=${Constants.SIYUAN_VERSION}`, "protyleWcHtmlScript");
+        registerServiceWorker(`${Constants.SERVICE_WORKER_PATH}?v=${Constants.SIYUAN_VERSION}`);
         addBaseURL();
         this.appId = Constants.SIYUAN_APPID;
         window.siyuan = {
@@ -46,7 +46,16 @@ class App {
             backStack: [],
             dialogs: [],
             blockPanels: [],
-            mobile: {},
+            mobile: {
+                docks: {
+                    outline: null,
+                    file: null,
+                    bookmark: null,
+                    tag: null,
+                    backlink: null,
+                    inbox: null,
+                }
+            },
             ws: new Model({
                 app: this,
                 id: genUUID(),
@@ -79,9 +88,16 @@ class App {
         window.addEventListener("pagehide", () => {
             saveScroll(window.siyuan.mobile.editor.protyle);
         }, false);
+        // 判断手机横竖屏状态
+        window.matchMedia("(orientation:portrait)").addEventListener("change", () => {
+            updateCardHV();
+        });
         fetchPost("/api/system/getConf", {}, async (confResponse) => {
-            confResponse.data.conf.keymap = Constants.SIYUAN_KEYMAP;
+            addScriptSync(`${Constants.PROTYLE_CDN}/js/lute/lute.min.js?v=${Constants.SIYUAN_VERSION}`, "protyleLuteScript");
+            addScript(`${Constants.PROTYLE_CDN}/js/protyle-html.js?v=${Constants.SIYUAN_VERSION}`, "protyleWcHtmlScript");
             window.siyuan.config = confResponse.data.conf;
+            window.siyuan.isPublish = confResponse.data.isPublish;
+            correctHotkey(siyuanApp);
             await loadPlugins(this);
             getLocalStorage(() => {
                 fetchGet(`/appearance/langs/${window.siyuan.config.appearance.lang}.json?v=${Constants.SIYUAN_VERSION}`, (lauguages: IObject) => {
@@ -111,8 +127,14 @@ class App {
             document.addEventListener("touchend", (event) => {
                 handleTouchEnd(event, siyuanApp);
             }, false);
+            window.addEventListener("keyup", () => {
+                window.siyuan.ctrlIsPressed = false;
+                window.siyuan.shiftIsPressed = false;
+                window.siyuan.altIsPressed = false;
+            });
             // 移动端删除键 https://github.com/siyuan-note/siyuan/issues/9259
             window.addEventListener("keydown", (event) => {
+                mobileKeydown(siyuanApp, event);
                 if (getSelection().rangeCount > 0) {
                     const range = getSelection().getRangeAt(0);
                     const editor = getCurrentEditor();
@@ -122,7 +144,7 @@ class App {
                         const nodeElement = hasClosestBlock(range.startContainer);
                         if (nodeElement && isNotEditBlock(nodeElement)) {
                             nodeElement.classList.add("protyle-wysiwyg--select");
-                            removeBlock(editor.protyle, nodeElement, range);
+                            removeBlock(editor.protyle, nodeElement, range, event.key);
                             event.stopPropagation();
                             event.preventDefault();
                             return;
@@ -139,11 +161,13 @@ const siyuanApp = new App();
 // https://github.com/siyuan-note/siyuan/issues/8441
 window.reconnectWebSocket = () => {
     window.siyuan.ws.send("ping", {});
-    window.siyuan.mobile.files.send("ping", {});
+    window.siyuan.mobile.docks.file.send("ping", {});
     window.siyuan.mobile.editor.protyle.ws.send("ping", {});
     window.siyuan.mobile.popEditor.protyle.ws.send("ping", {});
 };
 window.goBack = goBack;
+window.showMessage = showMessage;
+window.processIOSPurchaseResponse = processIOSPurchaseResponse;
 window.showKeyboardToolbar = (height) => {
     document.getElementById("keyboardToolbar").setAttribute("data-keyboardheight", (height ? height : window.outerHeight / 2 - 42).toString());
     showKeyboardToolbar();
@@ -152,7 +176,7 @@ window.hideKeyboardToolbar = hideKeyboardToolbar;
 window.openFileByURL = (openURL) => {
     if (openURL && isSYProtocol(openURL)) {
         openMobileFileById(siyuanApp, getIdFromSYProtocol(openURL),
-            getSearch("focus", openURL) === "1" ? [Constants.CB_GET_ALL, Constants.CB_GET_HL] : [Constants.CB_GET_HL, Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]);
+            getSearch("focus", openURL) === "1" ? [Constants.CB_GET_ALL] : [Constants.CB_GET_HL, Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]);
         return true;
     }
     return false;
