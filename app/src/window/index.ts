@@ -9,9 +9,13 @@ import {fetchGet, fetchPost} from "../util/fetch";
 import {addBaseURL, setNoteBook} from "../util/pathName";
 import {openFileById} from "../editor/util";
 import {
-    processSync, progressBackgroundTask,
+    processSync,
+    progressBackgroundTask,
     progressLoading,
-    progressStatus, reloadSync,
+    progressStatus,
+    reloadSync,
+    setDefRefCount,
+    setRefDynamicText,
     setTitle,
     transactionError
 } from "../dialog/processSystem";
@@ -21,14 +25,14 @@ import {getLocalStorage} from "../protyle/util/compatibility";
 import {init} from "../window/init";
 import {loadPlugins, reloadPlugin} from "../plugin/loader";
 import {hideAllElements} from "../protyle/ui/hideElements";
+import {reloadEmoji} from "../emoji";
+import {updateControlAlt} from "../protyle/util/hotKey";
 
 class App {
     public plugins: import("../plugin").Plugin[] = [];
     public appId: string;
 
     constructor() {
-        addScriptSync(`${Constants.PROTYLE_CDN}/js/lute/lute.min.js?v=${Constants.SIYUAN_VERSION}`, "protyleLuteScript");
-        addScript(`${Constants.PROTYLE_CDN}/js/protyle-html.js?v=${Constants.SIYUAN_VERSION}`, "protyleWcHtmlScript");
         addBaseURL();
         this.appId = Constants.SIYUAN_APPID;
         window.siyuan = {
@@ -51,8 +55,20 @@ class App {
                     });
                     if (data) {
                         switch (data.cmd) {
+                            case "setDefRefCount":
+                                setDefRefCount(data.data);
+                                break;
+                            case "setRefDynamicText":
+                                setRefDynamicText(data.data);
+                                break;
                             case "reloadPlugin":
-                                reloadPlugin(this);
+                                reloadPlugin(this, data.data);
+                                break;
+                            case "reloadEmojiConf":
+                                reloadEmoji();
+                                break;
+                            case "reloaddoc":
+                                reloadSync(this, {upsertRootIDs: [data.data], removeRootIDs: []}, false, false, true);
                                 break;
                             case "syncMergeResult":
                                 reloadSync(this, data.data);
@@ -63,6 +79,7 @@ class App {
                                 break;
                             case "setConf":
                                 window.siyuan.config = data.data;
+                                updateControlAlt();
                                 break;
                             case "progress":
                                 progressLoading(data);
@@ -137,7 +154,11 @@ class App {
             }),
         };
         fetchPost("/api/system/getConf", {}, async (response) => {
+            addScriptSync(`${Constants.PROTYLE_CDN}/js/lute/lute.min.js?v=${Constants.SIYUAN_VERSION}`, "protyleLuteScript");
+            addScript(`${Constants.PROTYLE_CDN}/js/protyle-html.js?v=${Constants.SIYUAN_VERSION}`, "protyleWcHtmlScript");
             window.siyuan.config = response.data.conf;
+            updateControlAlt();
+            window.siyuan.isPublish = response.data.isPublish;
             await loadPlugins(this);
             getLocalStorage(() => {
                 fetchGet(`/appearance/langs/${window.siyuan.config.appearance.lang}.json?v=${Constants.SIYUAN_VERSION}`, (lauguages: IObject) => {
