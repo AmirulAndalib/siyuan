@@ -15,24 +15,17 @@ export const mindmapRender = (element: Element, cdn = Constants.PROTYLE_CDN) => 
         return;
     }
     addScript(`${cdn}/js/echarts/echarts.min.js?v=0.0.0`, "protyleEchartsScript").then(() => {
+        const wysiswgElement = hasClosestByClassName(element, "protyle-wysiwyg", true);
         let width: number = undefined;
-        if (mindmapElements[0].firstElementChild.clientWidth === 0) {
-            const tabElement = hasClosestByClassName(mindmapElements[0], "layout-tab-container", true);
-            if (tabElement) {
-                Array.from(tabElement.children).find(item => {
-                    if (item.classList.contains("protyle") && !item.classList.contains("fn__none") && item.querySelector(".protyle-wysiwyg").firstElementChild) {
-                        width = item.querySelector(".protyle-wysiwyg").firstElementChild.clientWidth;
-                        return true;
-                    }
-                });
-            }
+        if (wysiswgElement && wysiswgElement.clientWidth > 0 && mindmapElements[0].firstElementChild.clientWidth === 0 && wysiswgElement.firstElementChild) {
+            width = wysiswgElement.firstElementChild.clientWidth;
         }
         mindmapElements.forEach((e: HTMLDivElement) => {
             if (e.getAttribute("data-render") === "true") {
                 return;
             }
             if (!e.firstElementChild.classList.contains("protyle-icons")) {
-                e.insertAdjacentHTML("afterbegin", genIconHTML());
+                e.insertAdjacentHTML("afterbegin", genIconHTML(wysiswgElement));
             }
             const renderElement = e.firstElementChild.nextElementSibling as HTMLElement;
             try {
@@ -64,7 +57,6 @@ export const mindmapRender = (element: Element, cdn = Constants.PROTYLE_CDN) => 
                                 width: 1,
                             },
                             roam: true,
-                            // @ts-ignores
                             symbol: (value: number, params: { data?: { children?: string } }) => {
                                 if (params?.data?.children) {
                                     return "circle";

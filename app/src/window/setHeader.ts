@@ -18,11 +18,9 @@ export const setTabPosition = () => {
         const dragElement = headerElement.querySelector(".item--readonly .fn__flex-1") as HTMLElement;
         if (rect.top <= 0) {
             dragElement.style.height = dragElement.parentElement.clientHeight + "px";
-            // @ts-ignore
-            dragElement.style.WebkitAppRegion = "drag";
+            (dragElement.style as CSSStyleDeclarationElectron).WebkitAppRegion = "drag";
         } else {
-            // @ts-ignore
-            dragElement.style.WebkitAppRegion = "";
+            (dragElement.style as CSSStyleDeclarationElectron).WebkitAppRegion = "";
         }
         const headersLastElement = headerElement.lastElementChild as HTMLElement;
         if ("darwin" === window.siyuan.config.system.os) {
@@ -30,10 +28,11 @@ export const setTabPosition = () => {
                 cmd: "isFullScreen",
             });
             if (rect.top <= 0 && rect.left <= 0 && !isFullScreen) {
-                item.headersElement.style.marginLeft = "var(--b3-toolbar-left-mac)";
+                // 用 marginLeft 左侧底部无线条
+                item.headersElement.style.paddingLeft = "var(--b3-toolbar-left-mac)";
                 headersLastElement.style.paddingRight = "42px";
             } else {
-                item.headersElement.style.marginLeft = "";
+                item.headersElement.style.paddingLeft = "";
                 headersLastElement.style.paddingRight = "";
             }
         }
