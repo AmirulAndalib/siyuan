@@ -16,7 +16,7 @@ import {Tag} from "./dock/Tag";
 import {Search} from "../search";
 import {Custom} from "./dock/Custom";
 import {newCardModel} from "../card/newCardTab";
-import {updateHotkeyTip} from "../protyle/util/compatibility";
+import {isIPad, updateHotkeyTip} from "../protyle/util/compatibility";
 import {openSearch} from "../search/spread";
 import {openRecentDocs} from "../business/openRecentDocs";
 import {openHistory} from "../history/history";
@@ -53,11 +53,20 @@ export const switchTabByIndex = (index: number) => {
         } else if (index === -2) {
             // 上一个
             indexElement = activeDockIcoElement.previousElementSibling;
+            if (!indexElement) {
+                indexElement = activeDockIcoElement.parentElement.lastElementChild;
+                if (indexElement.classList.contains("dock__item--pin")) {
+                    indexElement = indexElement.previousElementSibling;
+                }
+            }
         } else if (index === -3) {
             // 下一个
             indexElement = activeDockIcoElement.nextElementSibling;
+            if (!indexElement || indexElement.classList.contains("dock__item--pin")) {
+                indexElement = activeDockIcoElement.parentElement.firstElementChild;
+            }
         }
-        const type = indexElement?.getAttribute("data-type");
+        const type = indexElement?.getAttribute("data-type") as TDock;
         if (type) {
             getDockByType(type)?.toggleModel(type, true, false);
         }
@@ -72,9 +81,15 @@ export const switchTabByIndex = (index: number) => {
         } else if (index === -2) {
             // 上一个
             indexElement = tab.headElement.previousElementSibling;
+            if (!indexElement) {
+                indexElement = tab.headElement.parentElement.lastElementChild;
+            }
         } else if (index === -3) {
             // 下一个
             indexElement = tab.headElement.nextElementSibling;
+            if (!indexElement) {
+                indexElement = tab.headElement.parentElement.firstElementChild;
+            }
         }
         if (indexElement) {
             tab.parent.switchTab(indexElement as HTMLElement, true);
@@ -108,7 +123,11 @@ export const resizeTabs = (isSaveLayout = true) => {
             });
         });
         models.search.forEach(item => {
-            item.edit.resize();
+            if (item.element.querySelector("#searchUnRefPanel").classList.contains("fn__none")) {
+                item.editors.edit.resize();
+            } else {
+                item.editors.unRefEdit.resize();
+            }
         });
         models.custom.forEach(item => {
             if (item.resize) {
@@ -123,7 +142,7 @@ export const resizeTabs = (isSaveLayout = true) => {
     }, 200);
 };
 
-export const getDockByType = (type: string) => {
+export const getDockByType = (type: TDock | string) => {
     if (!window.siyuan.layout.leftDock) {
         return undefined;
     }
@@ -173,9 +192,9 @@ export const newCenterEmptyTab = (app: App) => {
         <svg class="b3-list-item__graphic"><use xlink:href="#iconFilesRoot"></use></svg>
         <span>${window.siyuan.languages.newNotebook}</span>
     </div>
-    <div class="b3-list-item" id="editorEmptyHelp">
+    <div class="b3-list-item${(isIPad() || window.siyuan.config.readonly) ? " fn__none" : ""}" id="editorEmptyHelp">
         <svg class="b3-list-item__graphic"><use xlink:href="#iconHelp"></use></svg>
-        <span>${window.siyuan.languages.help}</span>
+        <span>${window.siyuan.languages.userGuide}</span>
     </div>
 </div>`,
         callback(tab: Tab) {
@@ -234,11 +253,34 @@ export const copyTab = (app: App, tab: Tab) => {
         callback(newTab: Tab) {
             let model: Model;
             if (tab.model instanceof Editor) {
+                const newAction: TProtyleAction[] = [];
+                // https://github.com/siyuan-note/siyuan/issues/12132
+                tab.model.editor.protyle.block.action.forEach(item => {
+                    if (item !== Constants.CB_GET_APPEND && item !== Constants.CB_GET_BEFORE && item !== Constants.CB_GET_HTML) {
+                        newAction.push(item);
+                    }
+                });
                 model = new Editor({
                     app,
                     tab: newTab,
                     blockId: tab.model.editor.protyle.block.id,
-                    rootId: tab.model.editor.protyle.block.rootID
+                    rootId: tab.model.editor.protyle.block.rootID,
+                    // https://github.com/siyuan-note/siyuan/issues/12150
+                    action: newAction,
+                    afterInitProtyle(editor) {
+                        // https://github.com/siyuan-note/siyuan/issues/13851
+                        if (tab.model instanceof Editor) {
+                            const copyResizeTopElement = tab.model.editor.protyle.wysiwyg.element.querySelector("[data-resize-top]");
+                            if (copyResizeTopElement) {
+                                const newElement = editor.protyle.wysiwyg.element.querySelector(`[data-node-id="${copyResizeTopElement.getAttribute("data-node-id")}"]`);
+                                if (newElement) {
+                                    editor.protyle.observerLoad?.disconnect();
+                                    newElement.scrollIntoView();
+                                    editor.protyle.contentElement.scrollTop += parseInt(copyResizeTopElement.getAttribute("data-resize-top"));
+                                }
+                            }
+                        }
+                    }
                 });
             } else if (tab.model instanceof Asset) {
                 model = new Asset({

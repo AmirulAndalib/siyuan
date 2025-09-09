@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -29,13 +28,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/88250/go-humanize"
 	"github.com/88250/gulu"
 	"github.com/88250/lute/html"
-	"github.com/dustin/go-humanize"
 	"github.com/gorilla/websocket"
 	"github.com/siyuan-note/dejavu"
 	"github.com/siyuan-note/dejavu/cloud"
 	"github.com/siyuan-note/logging"
+	"github.com/siyuan-note/siyuan/kernel/cache"
 	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/sql"
@@ -64,7 +64,7 @@ func SyncDataDownload() {
 
 	err := syncRepoDownload()
 	code := 1
-	if nil != err {
+	if err != nil {
 		code = 2
 	}
 	util.BroadcastByType("main", "syncing", code, Conf.Sync.Stat, nil)
@@ -91,7 +91,7 @@ func SyncDataUpload() {
 
 	err := syncRepoUpload()
 	code := 1
-	if nil != err {
+	if err != nil {
 		code = 2
 	}
 	util.BroadcastByType("main", "syncing", code, Conf.Sync.Stat, nil)
@@ -150,7 +150,7 @@ func BootSyncData() {
 	util.BroadcastByType("main", "syncing", 0, Conf.Language(81), nil)
 	err := bootSyncRepo()
 	code := 1
-	if nil != err {
+	if err != nil {
 		code = 2
 	}
 	util.BroadcastByType("main", "syncing", code, Conf.Sync.Stat, nil)
@@ -190,7 +190,10 @@ func syncData(exit, byHand bool) {
 	if exit {
 		ExitSyncSucc = 0
 		logging.LogInfof("sync before exit")
-		util.PushMsg(Conf.Language(81), 1000*60*15)
+		msgId := util.PushMsg(Conf.Language(81), 1000*60*15)
+		defer func() {
+			util.PushClearMsg(msgId)
+		}()
 	}
 
 	now := util.CurrentTimeMillis()
@@ -198,7 +201,7 @@ func syncData(exit, byHand bool) {
 
 	dataChanged, err := syncRepo(exit, byHand)
 	code := 1
-	if nil != err {
+	if err != nil {
 		code = 2
 	}
 	util.BroadcastByType("main", "syncing", code, Conf.Sync.Stat, nil)
@@ -209,7 +212,7 @@ func syncData(exit, byHand bool) {
 	}
 
 	if 1 == Conf.Sync.Mode && nil != webSocketConn && Conf.Sync.Perception && dataChanged {
-		// 如果处于自动同步模式且不是又 WS 触发的同步，则通知其他设备上的内核进行同步
+		// 如果处于自动同步模式且不是由 WS 触发的同步，则通知其他设备上的内核进行同步
 		request := map[string]interface{}{
 			"cmd":    "synced",
 			"synced": Conf.Sync.Synced,
@@ -218,7 +221,6 @@ func syncData(exit, byHand bool) {
 			logging.LogErrorf("write websocket message failed: %v", writeErr)
 		}
 	}
-
 	return
 }
 
@@ -250,16 +252,10 @@ func checkSync(boot, exit, byHand bool) bool {
 		if !IsSubscriber() {
 			return false
 		}
-	case conf.ProviderWebDAV, conf.ProviderS3:
+	case conf.ProviderWebDAV, conf.ProviderS3, conf.ProviderLocal:
 		if !IsPaidUser() {
 			return false
 		}
-	}
-
-	if isSyncing.Load() {
-		logging.LogWarnf("sync is in progress")
-		planSyncAfter(fixSyncInterval)
-		return false
 	}
 
 	if 7 < autoSyncErrCount && !byHand {
@@ -296,7 +292,7 @@ func removeIndexes(removeFilePaths []string) (removeRootIDs []string) {
 			continue
 		}
 
-		id := strings.TrimSuffix(filepath.Base(removeFile), ".sy")
+		id := util.GetTreeID(removeFile)
 		removeRootIDs = append(removeRootIDs, id)
 		block := treenode.GetBlockTree(id)
 		if nil != block {
@@ -304,8 +300,14 @@ func removeIndexes(removeFilePaths []string) (removeRootIDs []string) {
 			util.IncBootProgress(bootProgressPart, msg)
 			util.PushStatusBar(msg)
 
+			bts := treenode.GetBlockTreesByRootID(block.RootID)
+			for _, b := range bts {
+				cache.RemoveBlockIAL(b.ID)
+			}
+			cache.RemoveDocIAL(block.Path)
+
 			treenode.RemoveBlockTreesByRootID(block.RootID)
-			sql.RemoveTreeQueue(block.BoxID, block.RootID)
+			sql.RemoveTreeQueue(block.RootID)
 		}
 	}
 
@@ -335,7 +337,7 @@ func upsertIndexes(upsertFilePaths []string) (upsertRootIDs []string) {
 
 		box := upsertFile[:idx]
 		p := strings.TrimPrefix(upsertFile, box)
-		msg := fmt.Sprintf(Conf.Language(40), strings.TrimSuffix(path.Base(p), ".sy"))
+		msg := fmt.Sprintf(Conf.Language(40), util.GetTreeID(p))
 		util.IncBootProgress(bootProgressPart, msg)
 		util.PushStatusBar(msg)
 
@@ -343,8 +345,15 @@ func upsertIndexes(upsertFilePaths []string) (upsertRootIDs []string) {
 		if nil != err0 {
 			continue
 		}
-		treenode.IndexBlockTree(tree)
+		treenode.UpsertBlockTree(tree)
 		sql.UpsertTreeQueue(tree)
+
+		bts := treenode.GetBlockTreesByRootID(tree.ID)
+		for _, b := range bts {
+			cache.RemoveBlockIAL(b.ID)
+		}
+		cache.RemoveDocIAL(tree.Path)
+
 		upsertRootIDs = append(upsertRootIDs, tree.Root.ID)
 	}
 
@@ -377,6 +386,20 @@ func SetSyncGenerateConflictDoc(b bool) {
 func SetSyncEnable(b bool) {
 	Conf.Sync.Enabled = b
 	Conf.Save()
+	return
+}
+
+func SetSyncInterval(interval int) {
+	if 30 > interval {
+		interval = 30
+	}
+	if 43200 < interval {
+		interval = 43200
+	}
+
+	Conf.Sync.Interval = interval
+	Conf.Save()
+	planSyncAfter(time.Duration(interval) * time.Second)
 	return
 }
 
@@ -416,6 +439,7 @@ func SetSyncProviderS3(s3 *conf.S3) (err error) {
 	s3.Bucket = strings.TrimSpace(s3.Bucket)
 	s3.Region = strings.TrimSpace(s3.Region)
 	s3.Timeout = util.NormalizeTimeout(s3.Timeout)
+	s3.ConcurrentReqs = util.NormalizeConcurrentReqs(s3.ConcurrentReqs, conf.ProviderS3)
 
 	if !cloud.IsValidCloudDirName(s3.Bucket) {
 		util.PushErrMsg(Conf.Language(37), 5000)
@@ -440,8 +464,48 @@ func SetSyncProviderWebDAV(webdav *conf.WebDAV) (err error) {
 	webdav.Username = strings.TrimSpace(webdav.Username)
 	webdav.Password = strings.TrimSpace(webdav.Password)
 	webdav.Timeout = util.NormalizeTimeout(webdav.Timeout)
+	webdav.ConcurrentReqs = util.NormalizeConcurrentReqs(webdav.ConcurrentReqs, conf.ProviderWebDAV)
 
 	Conf.Sync.WebDAV = webdav
+	Conf.Save()
+	return
+}
+
+func SetSyncProviderLocal(local *conf.Local) (err error) {
+	local.Endpoint = strings.TrimSpace(local.Endpoint)
+	local.Endpoint = util.NormalizeLocalPath(local.Endpoint)
+
+	absPath, err := filepath.Abs(local.Endpoint)
+	if nil != err {
+		msg := fmt.Sprintf("get endpoint [%s] abs path failed: %s", local.Endpoint, err)
+		logging.LogErrorf(msg)
+		err = errors.New(fmt.Sprintf(Conf.Language(77), msg))
+		return
+	}
+	if !gulu.File.IsExist(absPath) {
+		msg := fmt.Sprintf("endpoint [%s] not exist", local.Endpoint)
+		logging.LogErrorf(msg)
+		err = errors.New(fmt.Sprintf(Conf.Language(77), msg))
+		return
+	}
+	if util.IsAbsPathInWorkspace(absPath) || filepath.Clean(absPath) == filepath.Clean(util.WorkspaceDir) {
+		msg := fmt.Sprintf("endpoint [%s] is in workspace", local.Endpoint)
+		logging.LogErrorf(msg)
+		err = errors.New(fmt.Sprintf(Conf.Language(77), msg))
+		return
+	}
+
+	if util.IsSubPath(absPath, util.WorkspaceDir) {
+		msg := fmt.Sprintf("endpoint [%s] is parent of workspace", local.Endpoint)
+		logging.LogErrorf(msg)
+		err = errors.New(fmt.Sprintf(Conf.Language(77), msg))
+		return
+	}
+
+	local.Timeout = util.NormalizeTimeout(local.Timeout)
+	local.ConcurrentReqs = util.NormalizeConcurrentReqs(local.ConcurrentReqs, conf.ProviderLocal)
+
+	Conf.Sync.Local = local
 	Conf.Save()
 	return
 }
@@ -452,24 +516,27 @@ var (
 )
 
 func CreateCloudSyncDir(name string) (err error) {
-	if conf.ProviderSiYuan != Conf.Sync.Provider {
+	switch Conf.Sync.Provider {
+	case conf.ProviderSiYuan, conf.ProviderLocal:
+		break
+	default:
 		err = errors.New(Conf.Language(131))
 		return
 	}
 
 	name = strings.TrimSpace(name)
-	name = gulu.Str.RemoveInvisible(name)
+	name = util.RemoveInvalid(name)
 	if !cloud.IsValidCloudDirName(name) {
 		return errors.New(Conf.Language(37))
 	}
 
 	repo, err := newRepository()
-	if nil != err {
+	if err != nil {
 		return
 	}
 
 	err = repo.CreateCloudRepo(name)
-	if nil != err {
+	if err != nil {
 		err = errors.New(formatRepoErrorMsg(err))
 		return
 	}
@@ -477,7 +544,10 @@ func CreateCloudSyncDir(name string) (err error) {
 }
 
 func RemoveCloudSyncDir(name string) (err error) {
-	if conf.ProviderSiYuan != Conf.Sync.Provider {
+	switch Conf.Sync.Provider {
+	case conf.ProviderSiYuan, conf.ProviderLocal:
+		break
+	default:
 		err = errors.New(Conf.Language(131))
 		return
 	}
@@ -489,12 +559,12 @@ func RemoveCloudSyncDir(name string) (err error) {
 	}
 
 	repo, err := newRepository()
-	if nil != err {
+	if err != nil {
 		return
 	}
 
 	err = repo.RemoveCloudRepo(name)
-	if nil != err {
+	if err != nil {
 		err = errors.New(formatRepoErrorMsg(err))
 		return
 	}
@@ -515,12 +585,12 @@ func ListCloudSyncDir() (syncDirs []*Sync, hSize string, err error) {
 	var size int64
 
 	repo, err := newRepository()
-	if nil != err {
+	if err != nil {
 		return
 	}
 
 	dirs, size, err = repo.GetCloudRepos()
-	if nil != err {
+	if err != nil {
 		err = errors.New(formatRepoErrorMsg(err))
 		return
 	}
@@ -541,13 +611,17 @@ func ListCloudSyncDir() (syncDirs []*Sync, hSize string, err error) {
 			CloudName: d.Name,
 		}
 		if conf.ProviderSiYuan == Conf.Sync.Provider {
-			sync.HSize = humanize.Bytes(uint64(dirSize))
+			sync.HSize = humanize.BytesCustomCeil(uint64(dirSize), 2)
 		}
 		syncDirs = append(syncDirs, sync)
 	}
 	hSize = "-"
 	if conf.ProviderSiYuan == Conf.Sync.Provider {
-		hSize = humanize.Bytes(uint64(size))
+		hSize = humanize.BytesCustomCeil(uint64(size), 2)
+	}
+	if conf.ProviderS3 == Conf.Sync.Provider {
+		Conf.Sync.CloudName = syncDirs[0].CloudName
+		Conf.Save()
 	}
 	return
 }
@@ -572,10 +646,17 @@ func formatRepoErrorMsg(err error) string {
 		msg = Conf.Language(213)
 	} else if errors.Is(err, cloud.ErrCloudServiceUnavailable) {
 		msg = Conf.language(219)
+	} else if errors.Is(err, cloud.ErrCloudForbidden) {
+		msg = Conf.language(249)
+	} else if errors.Is(err, cloud.ErrCloudTooManyRequests) {
+		msg = Conf.language(250)
 	} else {
+		logging.LogErrorf("sync failed caused by network: %s", msg)
 		msgLowerCase := strings.ToLower(msg)
 		if strings.Contains(msgLowerCase, "permission denied") || strings.Contains(msg, "access is denied") {
 			msg = Conf.Language(33)
+		} else if strings.Contains(msgLowerCase, "region was not a valid") {
+			msg = Conf.language(254)
 		} else if strings.Contains(msgLowerCase, "device or resource busy") || strings.Contains(msg, "is being used by another") {
 			msg = fmt.Sprintf(Conf.Language(85), err)
 		} else if strings.Contains(msgLowerCase, "cipher: message authentication failed") {
@@ -584,7 +665,7 @@ func formatRepoErrorMsg(err error) string {
 			msg = Conf.Language(24)
 		} else if strings.Contains(msgLowerCase, "net/http: request canceled while waiting for connection") || strings.Contains(msgLowerCase, "exceeded while awaiting") || strings.Contains(msgLowerCase, "context deadline exceeded") || strings.Contains(msgLowerCase, "timeout") || strings.Contains(msgLowerCase, "context cancellation while reading body") {
 			msg = Conf.Language(24)
-		} else if strings.Contains(msgLowerCase, "connection was") || strings.Contains(msgLowerCase, "reset by peer") || strings.Contains(msgLowerCase, "refused") || strings.Contains(msgLowerCase, "socket") || strings.Contains(msgLowerCase, "closed idle connection") || strings.Contains(msgLowerCase, "eof") {
+		} else if strings.Contains(msgLowerCase, "connection") || strings.Contains(msgLowerCase, "refused") || strings.Contains(msgLowerCase, "socket") || strings.Contains(msgLowerCase, "eof") || strings.Contains(msgLowerCase, "closed") || strings.Contains(msgLowerCase, "network") {
 			msg = Conf.Language(28)
 		}
 	}
@@ -595,17 +676,17 @@ func formatRepoErrorMsg(err error) string {
 func getSyncIgnoreLines() (ret []string) {
 	ignore := filepath.Join(util.DataDir, ".siyuan", "syncignore")
 	err := os.MkdirAll(filepath.Dir(ignore), 0755)
-	if nil != err {
+	if err != nil {
 		return
 	}
 	if !gulu.File.IsExist(ignore) {
-		if err = gulu.File.WriteFileSafer(ignore, nil, 0644); nil != err {
+		if err = gulu.File.WriteFileSafer(ignore, nil, 0644); err != nil {
 			logging.LogErrorf("create syncignore [%s] failed: %s", ignore, err)
 			return
 		}
 	}
 	data, err := os.ReadFile(ignore)
-	if nil != err {
+	if err != nil {
 		logging.LogErrorf("read syncignore [%s] failed: %s", ignore, err)
 		return
 	}
@@ -617,6 +698,7 @@ func getSyncIgnoreLines() (ret []string) {
 	ret = append(ret, "20210808180117-6v0mkxr/**/*")
 	ret = append(ret, "20210808180117-czj9bvb/**/*")
 	ret = append(ret, "20211226090932-5lcq56f/**/*")
+	ret = append(ret, "20240530133126-axarxgx/**/*")
 
 	ret = gulu.Str.RemoveDuplicatedElem(ret)
 	return
@@ -624,7 +706,7 @@ func getSyncIgnoreLines() (ret []string) {
 
 func IncSync() {
 	syncSameCount.Store(0)
-	planSyncAfter(30 * time.Second)
+	planSyncAfter(time.Duration(Conf.Sync.Interval) * time.Second)
 }
 
 func planSyncAfter(d time.Duration) {
@@ -634,22 +716,29 @@ func planSyncAfter(d time.Duration) {
 }
 
 func isProviderOnline(byHand bool) (ret bool) {
-	checkURL := util.GetCloudSyncServer()
+	var checkURL string
 	skipTlsVerify := false
+	timeout := 3000
 	switch Conf.Sync.Provider {
 	case conf.ProviderSiYuan:
+		checkURL = util.GetCloudSyncServer()
 	case conf.ProviderS3:
 		checkURL = Conf.Sync.S3.Endpoint
 		skipTlsVerify = Conf.Sync.S3.SkipTlsVerify
+		timeout = Conf.Sync.S3.Timeout * 1000
 	case conf.ProviderWebDAV:
 		checkURL = Conf.Sync.WebDAV.Endpoint
 		skipTlsVerify = Conf.Sync.WebDAV.SkipTlsVerify
+		timeout = Conf.Sync.WebDAV.Timeout * 1000
+	case conf.ProviderLocal:
+		checkURL = "file://" + Conf.Sync.Local.Endpoint
+		timeout = Conf.Sync.Local.Timeout * 1000
 	default:
 		logging.LogWarnf("unknown provider: %d", Conf.Sync.Provider)
 		return false
 	}
 
-	if ret = util.IsOnline(checkURL, skipTlsVerify); !ret {
+	if ret = util.IsOnline(checkURL, skipTlsVerify, timeout); !ret {
 		if 1 > autoSyncErrCount || byHand {
 			util.PushErrMsg(Conf.Language(76)+" (Provider: "+conf.ProviderToStr(Conf.Sync.Provider)+")", 5000)
 		}
@@ -784,7 +873,8 @@ func connectSyncWebSocket() {
 			data := result.Data.(map[string]interface{})
 			switch data["cmd"].(string) {
 			case "synced":
-				syncData(false, false)
+				// Improve data synchronization perception https://github.com/siyuan-note/siyuan/issues/13000
+				SyncDataDownload()
 			case "kernels":
 				onlineKernelsLock.Lock()
 
@@ -819,7 +909,7 @@ func dialSyncWebSocket() (c *websocket.Conn, err error) {
 		"x-siyuan-repo":     []string{Conf.Sync.CloudName},
 	}
 	c, _, err = websocket.DefaultDialer.Dial(endpoint, header)
-	if nil == err {
+	if err == nil {
 		closedSyncWebSocket.Store(false)
 	}
 	return

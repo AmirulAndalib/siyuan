@@ -1,6 +1,8 @@
 import {Menu} from "../../../plugin/Menu";
 import {transaction} from "../../wysiwyg/transaction";
 import {hasClosestBlock, hasClosestByClassName} from "../../util/hasClosest";
+import {fetchSyncPost} from "../../../util/fetch";
+import {getFieldsByData} from "./view";
 
 const calcItem = (options: {
     menu: Menu,
@@ -10,7 +12,8 @@ const calcItem = (options: {
     colId: string,
     data?: IAV, // rollup
     target: HTMLElement,
-    avId: string
+    avId: string,
+    blockID: string
 }) => {
     options.menu.addItem({
         iconHTML: "",
@@ -23,18 +26,20 @@ const calcItem = (options: {
                     id: options.colId,
                     data: {
                         operator: options.operator
-                    }
+                    },
+                    blockID: options.blockID
                 }], [{
                     action: "setAttrViewColCalc",
                     avID: options.avId,
                     id: options.colId,
                     data: {
                         operator: options.oldOperator
-                    }
+                    },
+                    blockID: options.blockID
                 }]);
             } else {
                 options.target.querySelector(".b3-menu__accelerator").textContent = getNameByOperator(options.operator, true);
-                const colData = options.data.view.columns.find((item) => {
+                const colData = getFieldsByData(options.data).find((item) => {
                     if (item.id === options.colId) {
                         if (!item.rollup) {
                             item.rollup = {};
@@ -71,17 +76,23 @@ const calcItem = (options: {
     });
 };
 
-export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?: IAV, rollupId?: string) => {
+export const openCalcMenu = async (protyle: IProtyle, calcElement: HTMLElement, panelData?: {
+    data: IAV,
+    colId: string,
+    blockID: string
+}, x?: number) => {
     let rowElement: HTMLElement | false;
     let type;
-    let colId;
-    let avId;
-    let oldOperator;
-    if (data) {
-        avId = data.id;
+    let colId: string;
+    let avId: string;
+    let oldOperator: string;
+    let blockID: string;
+    if (panelData) {
+        avId = panelData.data.id;
         type = calcElement.dataset.colType as TAVCol;
         oldOperator = calcElement.dataset.calc;
-        colId = rollupId;
+        colId = panelData.colId;
+        blockID = panelData.blockID;
     } else {
         const blockElement = hasClosestBlock(calcElement);
         if (!blockElement) {
@@ -96,6 +107,10 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
         colId = calcElement.dataset.colId;
         avId = blockElement.dataset.avId;
         oldOperator = calcElement.dataset.operator;
+        blockID = blockElement.dataset.nodeId;
+    }
+    if (type === "lineNumber") {
+        return;
     }
     const menu = new Menu("av-calc", () => {
         if (rowElement) {
@@ -112,7 +127,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
         avId,
         oldOperator,
         operator: "",
-        data,
+        data: panelData?.data,
+        blockID,
         target: calcElement
     });
     calcItem({
@@ -122,7 +138,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
         avId,
         oldOperator,
         operator: "Count all",
-        data,
+        data: panelData?.data,
+        blockID,
         target: calcElement
     });
     if (type !== "checkbox") {
@@ -132,28 +149,9 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             colId,
             avId,
             oldOperator,
-            operator: "Count values",
-            data,
-            target: calcElement
-        });
-        calcItem({
-            menu,
-            protyle,
-            colId,
-            avId,
-            oldOperator,
-            operator: "Count unique values",
-            data,
-            target: calcElement
-        });
-        calcItem({
-            menu,
-            protyle,
-            colId,
-            avId,
-            oldOperator,
             operator: "Count empty",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -163,7 +161,30 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Count not empty",
-            data,
+            data: panelData?.data,
+            blockID,
+            target: calcElement
+        });
+        calcItem({
+            menu,
+            protyle,
+            colId,
+            avId,
+            oldOperator,
+            operator: "Count values",
+            data: panelData?.data,
+            blockID,
+            target: calcElement
+        });
+        calcItem({
+            menu,
+            protyle,
+            colId,
+            avId,
+            oldOperator,
+            operator: "Count unique values",
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -173,7 +194,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Percent empty",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -183,7 +205,19 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Percent not empty",
-            data,
+            data: panelData?.data,
+            blockID,
+            target: calcElement
+        });
+        calcItem({
+            menu,
+            protyle,
+            colId,
+            avId,
+            oldOperator,
+            operator: "Percent unique values",
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
     } else {
@@ -194,7 +228,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Checked",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -204,7 +239,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Unchecked",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -214,7 +250,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Percent checked",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -224,11 +261,48 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Percent unchecked",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
     }
-    if (["number", "template"].includes(type)) {
+    let rollupIsNumber = false;
+    if (type === "rollup") {
+        let relationKeyID: string;
+        let keyID: string;
+        let avData = panelData?.data;
+        if (!avData) {
+            const avResponse = await fetchSyncPost("api/av/renderAttributeView", {id: avId});
+            avData = avResponse.data;
+        }
+
+        getFieldsByData(avData).find((item) => {
+            if (item.id === colId) {
+                relationKeyID = item.rollup?.relationKeyID;
+                keyID = item.rollup?.keyID;
+                return true;
+            }
+        });
+        if (relationKeyID && keyID) {
+            let relationAvId: string;
+            getFieldsByData(avData).find((item) => {
+                if (item.id === relationKeyID) {
+                    relationAvId = item.relation?.avID;
+                    return true;
+                }
+            });
+            if (relationAvId) {
+                const colResponse = await fetchSyncPost("api/av/getAttributeView", {id: relationAvId});
+                colResponse.data.av.keyValues.find((item: { key: { id: string, name: string, type: TAVCol } }) => {
+                    if (item.key.id === keyID) {
+                        rollupIsNumber = item.key.type === "number";
+                        return true;
+                    }
+                });
+            }
+        }
+    }
+    if (["number", "template"].includes(type) || rollupIsNumber) {
         calcItem({
             menu,
             protyle,
@@ -236,7 +310,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Sum",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -246,7 +321,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Average",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -256,7 +332,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Median",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -266,7 +343,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Min",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -276,7 +354,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Max",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -286,7 +365,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Range",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
     } else if (["date", "created", "updated"].includes(type)) {
@@ -297,7 +377,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Earliest",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -307,7 +388,8 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Latest",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
         calcItem({
@@ -317,12 +399,13 @@ export const openCalcMenu = (protyle: IProtyle, calcElement: HTMLElement, data?:
             avId,
             oldOperator,
             operator: "Range",
-            data,
+            data: panelData?.data,
+            blockID,
             target: calcElement
         });
     }
     const calcRect = calcElement.getBoundingClientRect();
-    menu.open({x: calcRect.left, y: calcRect.bottom, h: calcRect.height});
+    menu.open({x: Math.max(x || 0, calcRect.left), y: calcRect.bottom, h: calcRect.height});
 };
 
 export const getCalcValue = (column: IAVColumn) => {
@@ -337,61 +420,64 @@ export const getCalcValue = (column: IAVColumn) => {
     let value = "";
     switch (column.calc.operator) {
         case "Count all":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultCountAll}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultCountAll}</small>`;
             break;
         case "Count values":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultCountValues}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultCountValues}</small>`;
             break;
         case "Count unique values":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultCountUniqueValues}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultCountUniqueValues}</small>`;
             break;
         case "Count empty":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultCountEmpty}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultCountEmpty}</small>`;
             break;
         case "Count not empty":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultCountNotEmpty}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultCountNotEmpty}</small>`;
             break;
         case "Percent empty":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultPercentEmpty}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultPercentEmpty}</small>`;
             break;
         case "Percent not empty":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultPercentNotEmpty}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultPercentNotEmpty}</small>`;
+            break;
+        case "Percent unique values":
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultPercentUniqueValues}</small>`;
             break;
         case "Sum":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultSum}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultSum}</small>`;
             break;
         case  "Average":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultAverage}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultAverage}</small>`;
             break;
         case  "Median":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultMedian}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultMedian}</small>`;
             break;
         case  "Min":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultMin}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultMin}</small>`;
             break;
         case  "Max":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultMax}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultMax}</small>`;
             break;
         case  "Range":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcResultRange}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcResultRange}</small>`;
             break;
         case  "Earliest":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcOperatorEarliest}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcOperatorEarliest}</small>`;
             break;
         case  "Latest":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.calcOperatorLatest}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.calcOperatorLatest}</small>`;
             break;
         case  "Checked":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.checked}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.checked}</small>`;
             break;
         case  "Unchecked":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.unchecked}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.unchecked}</small>`;
             break;
         case  "Percent checked":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.percentChecked}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.percentChecked}</small>`;
             break;
         case  "Percent unchecked":
-            value = `<span>${resultCalc.formattedContent}</span>${window.siyuan.languages.percentUnchecked}`;
+            value = `<span>${resultCalc.formattedContent}</span><small>${window.siyuan.languages.percentUnchecked}</small>`;
             break;
     }
     return value;
@@ -399,6 +485,7 @@ export const getCalcValue = (column: IAVColumn) => {
 
 export const getNameByOperator = (operator: string, isRollup: boolean) => {
     switch (operator) {
+        case undefined:
         case "":
             return isRollup ? window.siyuan.languages.original : window.siyuan.languages.calcOperatorNone;
         case "Count all":
@@ -415,6 +502,8 @@ export const getNameByOperator = (operator: string, isRollup: boolean) => {
             return window.siyuan.languages.calcOperatorPercentEmpty;
         case "Percent not empty":
             return window.siyuan.languages.calcOperatorPercentNotEmpty;
+        case "Percent unique values":
+            return window.siyuan.languages.calcOperatorPercentUniqueValues;
         case "Checked":
             return window.siyuan.languages.checked;
         case "Unchecked":

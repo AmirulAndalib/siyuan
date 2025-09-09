@@ -4,6 +4,9 @@ import {Plugin} from "../plugin";
 import {getAllModels} from "../layout/getAll";
 import {resizeTopBar} from "../layout/util";
 /// #endif
+import {Constants} from "../constants";
+import {setStorageVal} from "../protyle/util/compatibility";
+import {getAllEditor} from "../layout/getAll";
 
 export const uninstall = (app: App, name: string, isUninstall = false) => {
     app.plugins.find((plugin: Plugin, index) => {
@@ -13,6 +16,8 @@ export const uninstall = (app: App, name: string, isUninstall = false) => {
                 plugin.onunload();
                 if (isUninstall) {
                     plugin.uninstall();
+                    window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name] = {};
+                    setStorageVal(Constants.LOCAL_PLUGIN_DOCKS, window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS]);
                 }
             } catch (e) {
                 console.error(`plugin ${plugin.name} onunload error:`, e);
@@ -27,9 +32,12 @@ export const uninstall = (app: App, name: string, isUninstall = false) => {
             });
             /// #endif
             // rm topBar
-            plugin.topBarIcons.forEach(item => {
+            for (let i = 0; i < plugin.topBarIcons.length; i++) {
+                const item = plugin.topBarIcons[i];
                 item.remove();
-            });
+                plugin.topBarIcons.splice(i, 1);
+                i--;
+            }
             /// #if !MOBILE
             resizeTopBar();
             // rm statusBar
@@ -57,6 +65,14 @@ export const uninstall = (app: App, name: string, isUninstall = false) => {
             });
             // rm plugin
             app.plugins.splice(index, 1);
+            // rm icons
+            document.querySelector(`svg[data-name="${plugin.name}"]`)?.remove();
+            // rm protyle toolbar
+            getAllEditor().forEach(editor => {
+                editor.protyle.toolbar.update(editor.protyle);
+            });
+            // rm style
+            document.getElementById("pluginsStyle" + name)?.remove();
             return true;
         }
     });
