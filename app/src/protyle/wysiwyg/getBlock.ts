@@ -1,4 +1,4 @@
-import {hasClosestBlock, hasClosestByAttribute} from "../util/hasClosest";
+import {hasClosestBlock, hasClosestByAttribute, isInEmbedBlock} from "../util/hasClosest";
 import {Constants} from "../../constants";
 
 export const getPreviousBlock = (element: Element) => {
@@ -19,7 +19,7 @@ export const getPreviousBlock = (element: Element) => {
 export const getLastBlock = (element: Element) => {
     let lastElement;
     Array.from(element.querySelectorAll("[data-node-id]")).reverse().find(item => {
-        if (!hasClosestByAttribute(item.parentElement, "data-type", "NodeBlockQueryEmbed")) {
+        if (!isInEmbedBlock(item)) {
             lastElement = item;
             return true;
         }
@@ -30,8 +30,7 @@ export const getLastBlock = (element: Element) => {
 export const getFirstBlock = (element: Element) => {
     let firstElement;
     Array.from(element.querySelectorAll("[data-node-id]")).find(item => {
-        if (!hasClosestByAttribute(item.parentElement, "data-type", "NodeBlockQueryEmbed") &&
-            !item.classList.contains("li") && !item.classList.contains("sb")) {
+        if (!isInEmbedBlock(item) && !item.classList.contains("li") && !item.classList.contains("sb")) {
             firstElement = item;
             return true;
         }
@@ -71,10 +70,24 @@ export const getContenteditableElement = (element: Element) => {
     if (!element || (element.getAttribute("contenteditable") === "true") && !element.classList.contains("protyle-wysiwyg")) {
         return element;
     }
-    return element.querySelector('[contenteditable="true"]');
+    const editableElement = element.querySelector('[contenteditable="true"]');
+    if (editableElement && !hasClosestByAttribute(editableElement, "data-type", "NodeBlockQueryEmbed")) {
+        return editableElement;
+    }
+    return undefined;
 };
 
 export const isNotEditBlock = (element: Element) => {
+    if (element.classList.contains("sb")) {
+        let hasEditable = false;
+        Array.from(element.querySelectorAll("[data-node-id]")).find(item => {
+            if (!isNotEditBlock(item)) {
+                hasEditable = true;
+                return true;
+            }
+        });
+        return !hasEditable;
+    }
     return ["NodeBlockQueryEmbed", "NodeThematicBreak", "NodeMathBlock", "NodeHTMLBlock", "NodeIFrame", "NodeWidget", "NodeVideo", "NodeAudio"].includes(element.getAttribute("data-type")) ||
         (element.getAttribute("data-type") === "NodeCodeBlock" && element.classList.contains("render-node"));
 };
@@ -158,6 +171,33 @@ export const hasNextSibling = (element: Node) => {
         }
     }
     return false;
+};
+
+export const isEndOfBlock = (range: Range) => {
+    if (range.endContainer.nodeType === 3 &&
+        range.endContainer.textContent.length !== range.endOffset &&
+        range.endContainer.textContent !== Constants.ZWSP &&
+        range.endContainer.textContent !== "\n") {
+        return false;
+    }
+
+    let nextSibling = range.endContainer;
+    if (range.endContainer.nodeType !== 3) {
+        nextSibling = range.endContainer.childNodes[range.endOffset];
+    }
+
+    while (nextSibling) {
+        if (hasNextSibling(nextSibling)) {
+            return false;
+        } else {
+            if (nextSibling.parentElement.getAttribute("spellcheck")) {
+                return true;
+            }
+            nextSibling = nextSibling.parentElement;
+        }
+    }
+
+    return true;
 };
 
 export const hasPreviousSibling = (element: Node) => {
