@@ -17,6 +17,8 @@
 package util
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -43,11 +45,27 @@ func GetRhyResult(force bool) (map[string]interface{}, error) {
 	}
 
 	request := httpclient.NewCloudRequest30s()
-	_, err := request.SetSuccessResult(&cachedRhyResult).Get(GetCloudServer() + "/apis/siyuan/version?ver=" + Ver)
-	if nil != err {
+	resp, err := request.SetSuccessResult(&cachedRhyResult).Get(GetCloudServer() + "/apis/siyuan/version?ver=" + Ver)
+	if err != nil {
 		logging.LogErrorf("get version info failed: %s", err)
 		return nil, err
 	}
+	if 200 != resp.StatusCode {
+		msg := fmt.Sprintf("get rhy result failed: %d", resp.StatusCode)
+		logging.LogErrorf(msg)
+		return nil, errors.New(msg)
+	}
 	rhyResultCacheTime = now
 	return cachedRhyResult, nil
+}
+
+func RefreshRhyResultJob() {
+	_, err := GetRhyResult(true)
+	if nil != err {
+		// 系统唤醒后可能还没有网络连接，这里等待后再重试
+		go func() {
+			time.Sleep(7 * time.Second)
+			GetRhyResult(true)
+		}()
+	}
 }

@@ -1,6 +1,7 @@
 import {fetchPost} from "../../util/fetch";
-import {genOptions} from "../../util/genOptions";
+import {genLangOptions, genOptions} from "../../util/genOptions";
 import {openModel} from "../menu/model";
+import {reloadOtherWindow} from "../../dialog/processSystem";
 
 export const initAppearance = () => {
     openModel({
@@ -40,7 +41,7 @@ export const initAppearance = () => {
 <div class="b3-label">
     ${window.siyuan.languages.language}
     <div class="fn__hr"></div>
-    <select id="lang" class="b3-select fn__block">${genOptions(window.siyuan.config.langs, window.siyuan.config.appearance.lang)}</select>
+    <select id="lang" class="b3-select fn__block">${genLangOptions(window.siyuan.config.langs, window.siyuan.config.appearance.lang)}</select>
     <div class="b3-label__text">${window.siyuan.languages.language1}</div>
 </div>`,
         bindEvent(modelMainElement: HTMLElement) {
@@ -55,6 +56,7 @@ export const initAppearance = () => {
                         themeLight: (modelMainElement.querySelector("#themeLight") as HTMLSelectElement).value,
                         lang: (modelMainElement.querySelector("#lang") as HTMLSelectElement).value,
                     }), () => {
+                        reloadOtherWindow();
                         window.location.reload();
                     });
                 });

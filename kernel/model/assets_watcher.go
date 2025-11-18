@@ -33,7 +33,7 @@ import (
 var assetsWatcher *fsnotify.Watcher
 
 func WatchAssets() {
-	if util.ContainerAndroid == util.Container || util.ContainerIOS == util.Container {
+	if util.ContainerAndroid == util.Container || util.ContainerIOS == util.Container || util.ContainerHarmony == util.Container {
 		return
 	}
 
@@ -49,7 +49,7 @@ func watchAssets() {
 	}
 
 	var err error
-	if assetsWatcher, err = fsnotify.NewWatcher(); nil != err {
+	if assetsWatcher, err = fsnotify.NewWatcher(); err != nil {
 		logging.LogErrorf("add assets watcher for folder [%s] failed: %s", assetsDir, err)
 		return
 	}
@@ -75,9 +75,9 @@ func watchAssets() {
 				timer.Reset(time.Millisecond * 100)
 
 				if lastEvent.Op&fsnotify.Rename == fsnotify.Rename || lastEvent.Op&fsnotify.Write == fsnotify.Write {
-					IndexAssetContent(lastEvent.Name)
+					HandleAssetsChangeEvent(lastEvent.Name)
 				} else if lastEvent.Op&fsnotify.Remove == fsnotify.Remove {
-					RemoveIndexAssetContent(lastEvent.Name)
+					HandleAssetsRemoveEvent(lastEvent.Name)
 				}
 			case err, ok := <-assetsWatcher.Errors:
 				if !ok {
@@ -94,9 +94,9 @@ func watchAssets() {
 				go cache.LoadAssets()
 
 				if lastEvent.Op&fsnotify.Remove == fsnotify.Remove {
-					RemoveIndexAssetContent(lastEvent.Name)
+					HandleAssetsRemoveEvent(lastEvent.Name)
 				} else {
-					IndexAssetContent(lastEvent.Name)
+					HandleAssetsChangeEvent(lastEvent.Name)
 				}
 			}
 		}
