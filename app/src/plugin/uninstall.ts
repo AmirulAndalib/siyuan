@@ -1,21 +1,29 @@
 import {App} from "../index";
-import {Plugin} from "../plugin";
+import {Plugin} from "./index";
 /// #if !MOBILE
 import {getAllModels} from "../layout/getAll";
 import {resizeTopBar} from "../layout/util";
 /// #endif
+import {Constants} from "../constants";
+import {setStorageVal} from "../protyle/util/compatibility";
+import {getAllEditor} from "../layout/getAll";
 
-export const uninstall = (app: App, name: string, isUninstall = false) => {
+export const uninstall = (app: App, name: string, isUninstall: boolean) => {
     app.plugins.find((plugin: Plugin, index) => {
         if (plugin.name === name) {
-            // rm command
             try {
                 plugin.onunload();
-                if (isUninstall) {
-                    plugin.uninstall();
-                }
             } catch (e) {
                 console.error(`plugin ${plugin.name} onunload error:`, e);
+            }
+            if (isUninstall) {
+                try {
+                    plugin.uninstall();
+                } catch (e) {
+                    console.error(`plugin ${plugin.name} uninstall error:`, e);
+                }
+                window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name] = {};
+                setStorageVal(Constants.LOCAL_PLUGIN_DOCKS, window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS]);
             }
             // rm tab
             /// #if !MOBILE
@@ -27,9 +35,12 @@ export const uninstall = (app: App, name: string, isUninstall = false) => {
             });
             /// #endif
             // rm topBar
-            plugin.topBarIcons.forEach(item => {
+            for (let i = 0; i < plugin.topBarIcons.length; i++) {
+                const item = plugin.topBarIcons[i];
                 item.remove();
-            });
+                plugin.topBarIcons.splice(i, 1);
+                i--;
+            }
             /// #if !MOBILE
             resizeTopBar();
             // rm statusBar
@@ -57,6 +68,14 @@ export const uninstall = (app: App, name: string, isUninstall = false) => {
             });
             // rm plugin
             app.plugins.splice(index, 1);
+            // rm icons
+            document.querySelector(`svg[data-name="${plugin.name}"]`)?.remove();
+            // rm protyle toolbar
+            getAllEditor().forEach(editor => {
+                editor.protyle.toolbar.update(editor.protyle);
+            });
+            // rm style
+            document.getElementById("pluginsStyle" + name)?.remove();
             return true;
         }
     });
