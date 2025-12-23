@@ -16,9 +16,9 @@ export const fetchNewDailyNote = (app: App, notebook: string) => {
         app: Constants.SIYUAN_APPID,
     }, (response) => {
         /// #if MOBILE
-        openMobileFileById(app, response.data.id);
+        openMobileFileById(app, response.data.id, [Constants.CB_GET_SCROLL, Constants.CB_GET_FOCUS]);
         /// #else
-        openFileById({app, id: response.data.id, action: [Constants.CB_GET_FOCUS]});
+        openFileById({app, id: response.data.id, action: [Constants.CB_GET_SCROLL, Constants.CB_GET_FOCUS]});
         /// #endif
     });
 };
@@ -96,7 +96,8 @@ export const mountHelp = () => {
     const notebookId = Constants.HELP_PATH[window.siyuan.config.appearance.lang as "zh_CN" | "en_US"];
     fetchPost("/api/notebook/removeNotebook", {notebook: notebookId, callback: Constants.CB_MOUNT_REMOVE}, () => {
         fetchPost("/api/notebook/openNotebook", {
-            notebook: notebookId
+            notebook: notebookId,
+            app: Constants.SIYUAN_APPID,
         });
     });
 };

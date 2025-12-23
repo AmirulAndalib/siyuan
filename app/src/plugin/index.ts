@@ -4,9 +4,9 @@ import {fetchPost} from "../util/fetch";
 import {isMobile, isWindow} from "../util/functions";
 /// #if !MOBILE
 import {Custom} from "../layout/dock/Custom";
-import {getAllModels} from "../layout/getAll";
+import {getAllEditor, getAllModels} from "../layout/getAll";
 import {Tab} from "../layout/Tab";
-import {setPanelFocus} from "../layout/util";
+import {resizeTopBar, setPanelFocus} from "../layout/util";
 import {getDockByType} from "../layout/tabUtil";
 ///#else
 import {MobileCustom} from "../mobile/dock/MobileCustom";
@@ -14,6 +14,10 @@ import {MobileCustom} from "../mobile/dock/MobileCustom";
 import {hasClosestByAttribute} from "../protyle/util/hasClosest";
 import {BlockPanel} from "../block/Panel";
 import {Setting} from "./Setting";
+import {clearOBG} from "../layout/dock/util";
+import {Constants} from "../constants";
+import {uninstall} from "./uninstall";
+import {afterLoadPlugin, loadPlugins} from "./loader";
 
 export class Plugin {
     private app: App;
@@ -26,7 +30,7 @@ export class Plugin {
         filter: string[],
         html: string,
         id: string,
-        callback: (protyle: import("../protyle").Protyle) => void
+        callback: (protyle: import("../protyle").Protyle, nodeElement: HTMLElement) => void
     }[] = [];
     // TODO
     public customBlockRenders: {
@@ -56,7 +60,7 @@ export class Plugin {
             /// #endif
         }
     } = {};
-    private protyleOptionsValue: IOptions;
+    private protyleOptionsValue: IProtyleOptions;
 
     constructor(options: {
         app: App,
@@ -74,9 +78,32 @@ export class Plugin {
             value: options.name,
             writable: false,
         });
+
+        this.updateProtyleToolbar([]).forEach(toolbarItem => {
+            if (typeof toolbarItem === "string" || Constants.INLINE_TYPE.concat("|").includes(toolbarItem.name) || !toolbarItem.hotkey) {
+                return;
+            }
+            if (!window.siyuan.config.keymap.plugin) {
+                window.siyuan.config.keymap.plugin = {};
+            }
+            if (!window.siyuan.config.keymap.plugin[options.name]) {
+                window.siyuan.config.keymap.plugin[options.name] = {
+                    [toolbarItem.name]: {
+                        default: toolbarItem.hotkey,
+                        custom: toolbarItem.hotkey,
+                    }
+                };
+            }
+            if (!window.siyuan.config.keymap.plugin[options.name][toolbarItem.name]) {
+                window.siyuan.config.keymap.plugin[options.name][toolbarItem.name] = {
+                    default: toolbarItem.hotkey,
+                    custom: toolbarItem.hotkey,
+                };
+            }
+        });
     }
 
-    public onload() {
+    public onload(): Promise<void> | void {
         // 加载
     }
 
@@ -88,6 +115,18 @@ export class Plugin {
         // 卸载
     }
 
+    public onDataChanged() {
+        // 存储数据变更
+        // 兼容 3.4.1 以前同步数据使用重载插件的问题
+        uninstall(this.app, this.name, true);
+        loadPlugins(this.app, [this.name], false).then(() => {
+            afterLoadPlugin(this);
+            getAllEditor().forEach(editor => {
+                editor.protyle.toolbar.update(editor.protyle);
+            });
+        });
+    }
+
     public async updateCards(options: ICardData) {
         return options;
     }
@@ -97,18 +136,58 @@ export class Plugin {
     }
 
     public addCommand(command: ICommand) {
-        this.commands.push(command);
+        if (!window.siyuan.config.keymap.plugin) {
+            window.siyuan.config.keymap.plugin = {};
+        }
+        if (!window.siyuan.config.keymap.plugin[this.name]) {
+            command.customHotkey = command.hotkey;
+            window.siyuan.config.keymap.plugin[this.name] = {
+                [command.langKey]: {
+                    default: command.hotkey,
+                    custom: command.hotkey,
+                }
+            };
+        } else if (!window.siyuan.config.keymap.plugin[this.name][command.langKey]) {
+            command.customHotkey = command.hotkey;
+            window.siyuan.config.keymap.plugin[this.name][command.langKey] = {
+                default: command.hotkey,
+                custom: command.hotkey,
+            };
+        } else if (window.siyuan.config.keymap.plugin[this.name][command.langKey]) {
+            if (typeof window.siyuan.config.keymap.plugin[this.name][command.langKey].custom === "string") {
+                command.customHotkey = window.siyuan.config.keymap.plugin[this.name][command.langKey].custom;
+            } else {
+                command.customHotkey = command.hotkey;
+            }
+            window.siyuan.config.keymap.plugin[this.name][command.langKey]["default"] = command.hotkey;
+        }
+        if (typeof command.customHotkey !== "string") {
+            console.error(`${this.name} - commands data is error and has been removed.`);
+        } else {
+            this.commands.push(command);
+        }
     }
 
     public addIcons(svg: string) {
-        document.body.insertAdjacentHTML("afterbegin", `<svg data-name="${this.name}" style="position: absolute; width: 0; height: 0; overflow: hidden;" xmlns="http://www.w3.org/2000/svg">
+        const svgElement = document.querySelector(`svg[data-name="${this.name}"] defs`);
+        if (svgElement) {
+            svgElement.insertAdjacentHTML("afterbegin", svg);
+        } else {
+            const lastSvgElement = document.querySelector("body > svg:last-of-type");
+            if (lastSvgElement) {
+                lastSvgElement.insertAdjacentHTML("afterend", `<svg data-name="${this.name}" style="position: absolute; width: 0; height: 0; overflow: hidden;" xmlns="http://www.w3.org/2000/svg">
 <defs>${svg}</defs></svg>`);
+            } else {
+                document.body.insertAdjacentHTML("afterbegin", `<svg data-name="${this.name}" style="position: absolute; width: 0; height: 0; overflow: hidden;" xmlns="http://www.w3.org/2000/svg">
+<defs>${svg}</defs></svg>`);
+            }
+        }
     }
 
     public addTopBar(options: {
         icon: string,
         title: string,
-        position?: "right" | "left",
+        position?: "south" | "left",
         callback: (evt: MouseEvent) => void
     }) {
         if (!options.icon.startsWith("icon") && !options.icon.startsWith("<svg")) {
@@ -128,7 +207,18 @@ export class Plugin {
             iconElement.setAttribute("aria-label", options.title);
             iconElement.innerHTML = options.icon.startsWith("icon") ? `<svg><use xlink:href="#${options.icon}"></use></svg>` : options.icon;
             iconElement.addEventListener("click", options.callback);
-            iconElement.setAttribute("data-position", options.position || "right");
+            iconElement.setAttribute("data-location", options.position || "right");
+            resizeTopBar();
+        }
+        if (isMobile() && window.siyuan.storage) {
+            if (!window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN].includes(iconElement.id)) {
+                document.querySelector("#menuAbout")?.after(iconElement);
+            }
+        } else if (!isWindow() && window.siyuan.storage) {
+            if (window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN].includes(iconElement.id)) {
+                iconElement.classList.add("fn__none");
+            }
+            document.querySelector("#" + (iconElement.getAttribute("data-location") === "right" ? "barPlugins" : "drag"))?.before(iconElement);
         }
         this.topBarIcons.push(iconElement);
         return iconElement;
@@ -139,8 +229,16 @@ export class Plugin {
         position?: "right" | "left",
     }) {
         /// #if !MOBILE
-        options.element.setAttribute("data-position", options.position || "right");
+        options.element.setAttribute("data-location", options.position || "right");
         this.statusBarIcons.push(options.element);
+        const statusElement = document.getElementById("status");
+        if (statusElement) {
+            if (options.element.getAttribute("data-location") === "right") {
+                statusElement.insertAdjacentElement("beforeend", options.element);
+            } else {
+                statusElement.insertAdjacentElement("afterbegin", options.element);
+            }
+        }
         return options.element;
         /// #endif
     }
@@ -149,7 +247,7 @@ export class Plugin {
         if (!this.setting) {
             return;
         }
-        this.setting.open(this.name);
+        this.setting.open(this.displayName || this.name);
     }
 
     public loadData(storageName: string) {
@@ -167,6 +265,10 @@ export class Plugin {
     }
 
     public saveData(storageName: string, data: any) {
+        if (window.siyuan.config.readonly || window.siyuan.isPublish) {
+            return;
+        }
+
         return new Promise((resolve) => {
             const pathString = `/data/storage/petal/${this.name}/${storageName}`;
             let file: File;
@@ -189,6 +291,10 @@ export class Plugin {
     }
 
     public removeData(storageName: string) {
+        if (window.siyuan.config.readonly || window.siyuan.isPublish) {
+            return;
+        }
+
         return new Promise((resolve) => {
             if (!this.data) {
                 this.data = {};
@@ -239,6 +345,7 @@ export class Plugin {
                 update: options.update,
             });
             customObj.element.addEventListener("click", () => {
+                clearOBG();
                 setPanelFocus(customObj.element.parentElement.parentElement);
             });
             return customObj;
@@ -297,29 +404,56 @@ export class Plugin {
             }
             /// #endif
         };
+        if (!window.siyuan.config.keymap.plugin) {
+            window.siyuan.config.keymap.plugin = {};
+        }
+        if (options.config.hotkey) {
+            if (!window.siyuan.config.keymap.plugin[this.name]) {
+                window.siyuan.config.keymap.plugin[this.name] = {
+                    [type2]: {
+                        default: options.config.hotkey,
+                        custom: options.config.hotkey,
+                    }
+                };
+            } else if (!window.siyuan.config.keymap.plugin[this.name][type2]) {
+                window.siyuan.config.keymap.plugin[this.name][type2] = {
+                    default: options.config.hotkey,
+                    custom: options.config.hotkey,
+                };
+            } else if (window.siyuan.config.keymap.plugin[this.name][type2]) {
+                if (typeof window.siyuan.config.keymap.plugin[this.name][type2].custom !== "string") {
+                    window.siyuan.config.keymap.plugin[this.name][type2].custom = options.config.hotkey;
+                }
+                window.siyuan.config.keymap.plugin[this.name][type2]["default"] = options.config.hotkey;
+            }
+        }
         return this.docks[type2];
     }
 
     public addFloatLayer = (options: {
-        ids: string[],
-        defIds?: string[],
+        refDefs: IRefDefs[],
         x?: number,
         y?: number,
         targetElement?: HTMLElement,
+        originalRefBlockIDs?: IObject,
         isBacklink: boolean,
     }) => {
         window.siyuan.blockPanels.push(new BlockPanel({
             app: this.app,
+            originalRefBlockIDs: options.originalRefBlockIDs,
             targetElement: options.targetElement,
             isBacklink: options.isBacklink,
             x: options.x,
             y: options.y,
-            nodeIds: options.ids,
-            defIds: options.defIds,
+            refDefs: options.refDefs,
         }));
     };
 
-    set protyleOptions(options: IOptions) {
+    public updateProtyleToolbar(toolbar: Array<string | IMenuItem>) {
+        return toolbar;
+    }
+
+    set protyleOptions(options: IProtyleOptions) {
         this.protyleOptionsValue = options;
     }
 

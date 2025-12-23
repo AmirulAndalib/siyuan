@@ -4,13 +4,21 @@ import * as dayjs from "dayjs";
 
 export const turnIntoTaskList = (protyle: IProtyle, type: string, blockElement: HTMLElement, editElement: HTMLElement, range: Range) => {
     if (type !== "NodeCodeBlock" &&
-        blockElement.parentElement.getAttribute("data-subtype") !== "t" &&
+        // 任务列表首块不需要再更新为任务列表
+        !blockElement.previousElementSibling?.classList.contains("protyle-action--task") &&
         (
             ["[ ]", "[x]", "[X]", "【 】", "【x】", "【X】"].includes(editElement.innerHTML.substring(0, 3)) ||
             ["[]", "【】"].includes(editElement.innerHTML.substring(0, 2))
         )
     ) {
-        const contextStartIndex = (editElement.innerHTML.indexOf("]") + 1) || (editElement.innerHTML.indexOf("】") + 1);
+        const contextStar2tIndex = editElement.innerHTML.indexOf("】") + 1;
+        let contextStartIndex = editElement.innerHTML.indexOf("]") + 1;
+        if (contextStartIndex === 0) {
+            contextStartIndex = contextStar2tIndex;
+        } else if (contextStartIndex > 0 && contextStar2tIndex > 0) {
+            contextStartIndex = Math.min(contextStartIndex, contextStar2tIndex);
+        }
+        editElement.removeAttribute("placeholder");
         const isDone = editElement.innerHTML.substring(1, 2).toLowerCase() === "x";
         if (blockElement.parentElement.classList.contains("li") &&
             blockElement.parentElement.childElementCount === 3  // https://ld246.com/article/1659315815506
@@ -57,16 +65,16 @@ export const turnIntoTaskList = (protyle: IProtyle, type: string, blockElement: 
                 action: "delete",
                 id: emptyId
             }], [{
-                action: "update",
-                id,
-                data: oldHTML,
-            }, {
                 action: "move",
                 id,
                 previousID: newId,
             }, {
                 action: "delete",
                 id: newId
+            }, {
+                action: "update",
+                id,
+                data: oldHTML,
             }]);
             blockElement.outerHTML = `<div data-subtype="t" data-node-id="${newId}" data-type="NodeList" class="list" updated="${newId.split("-")[0]}"><div data-marker="*" data-subtype="t" data-node-id="${liItemId}" data-type="NodeListItem" class="li${isDone ? " protyle-task--done" : ""}" updated="${liItemId.split("-")[0]}"><div class="protyle-action protyle-action--task" draggable="true"><svg><use xlink:href="#icon${isDone ? "C" : "Unc"}heck"></use></svg></div>${blockElement.outerHTML}<div class="protyle-attr" contenteditable="false"></div></div><div class="protyle-attr" contenteditable="false"></div></div>`;
             focusByWbr(protyle.wysiwyg.element, range);

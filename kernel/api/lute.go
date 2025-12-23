@@ -44,7 +44,27 @@ func copyStdMarkdown(c *gin.Context) {
 	}
 
 	id := arg["id"].(string)
-	ret.Data = model.ExportStdMarkdown(id)
+	assetsDestSpace2Underscore := false
+	if nil != arg["assetsDestSpace2Underscore"] {
+		assetsDestSpace2Underscore = arg["assetsDestSpace2Underscore"].(bool)
+	}
+
+	fillCSSVar := false
+	if nil != arg["fillCSSVar"] {
+		fillCSSVar = arg["fillCSSVar"].(bool)
+	}
+
+	adjustHeadingLevel := false
+	if nil != arg["adjustHeadingLevel"] {
+		adjustHeadingLevel = arg["adjustHeadingLevel"].(bool)
+	}
+
+	imgTag := false
+	if nil != arg["imgTag"] {
+		imgTag = arg["imgTag"].(bool)
+	}
+
+	ret.Data = model.ExportStdMarkdown(id, assetsDestSpace2Underscore, fillCSSVar, adjustHeadingLevel, imgTag)
 }
 
 func html2BlockDOM(c *gin.Context) {
@@ -57,13 +77,19 @@ func html2BlockDOM(c *gin.Context) {
 	}
 
 	dom := arg["dom"].(string)
-	markdown, err := model.HTML2Markdown(dom)
-	if nil != err {
+	luteEngine := util.NewLute()
+	luteEngine.SetHTMLTag2TextMark(true)
+	luteEngine.SetHTML2MarkdownAttrs([]string{"alias", "memo", "bookmark", "custom-*"})
+	markdown, withMath, err := model.HTML2Markdown(dom, luteEngine)
+	if err != nil {
 		ret.Data = "Failed to convert"
 		return
 	}
 
-	luteEngine := util.NewLute()
+	if withMath {
+		luteEngine.SetInlineMath(true)
+	}
+
 	var unlinks []*ast.Node
 	tree := parse.Parse("", []byte(markdown), luteEngine.ParseOptions)
 	ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
@@ -72,7 +98,7 @@ func html2BlockDOM(c *gin.Context) {
 		}
 
 		if ast.NodeListItem == n.Type && nil == n.FirstChild {
-			newNode := treenode.NewParagraph()
+			newNode := treenode.NewParagraph("")
 			n.AppendChild(newNode)
 			n.SetIALAttr("updated", util.TimeFromID(newNode.ID))
 			return ast.WalkSkipChildren
@@ -96,7 +122,7 @@ func html2BlockDOM(c *gin.Context) {
 				row := head.FirstChild
 				if nil != row.FirstChild && nil == row.FirstChild.Next {
 					cell := row.FirstChild
-					p := treenode.NewParagraph()
+					p := treenode.NewParagraph("")
 					var contents []*ast.Node
 					for c := cell.FirstChild; nil != c; c = c.Next {
 						contents = append(contents, c)
@@ -151,7 +177,7 @@ func html2BlockDOM(c *gin.Context) {
 			name = name[0 : len(name)-len(ext)]
 			name = name + "-" + ast.NewNodeID() + ext
 			targetPath := filepath.Join(util.DataDir, "assets", name)
-			if err = filelock.Copy(localPath, targetPath); nil != err {
+			if err = filelock.Copy(localPath, targetPath); err != nil {
 				logging.LogErrorf("copy asset from [%s] to [%s] failed: %s", localPath, targetPath, err)
 				return ast.WalkStop
 			}
@@ -160,10 +186,10 @@ func html2BlockDOM(c *gin.Context) {
 		})
 	}
 
-	// 复制带超链接的图片无法保存到本地 https://github.com/siyuan-note/siyuan/issues/5993
-	parse.NestedInlines2FlattedSpans(tree, false)
+	parse.TextMarks2Inlines(tree) // 先将 TextMark 转换为 Inlines https://github.com/siyuan-note/siyuan/issues/13056
+	parse.NestedInlines2FlattedSpansHybrid(tree, false)
 
-	renderer := render.NewProtyleRenderer(tree, luteEngine.RenderOptions)
+	renderer := render.NewProtyleRenderer(tree, luteEngine.RenderOptions, luteEngine.ParseOptions)
 	output := renderer.Render()
 	ret.Data = gulu.Str.FromBytes(output)
 }

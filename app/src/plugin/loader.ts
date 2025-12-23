@@ -8,6 +8,8 @@ import {API} from "./API";
 import {getFrontend, isMobile, isWindow} from "../util/functions";
 import {Constants} from "../constants";
 import {uninstall} from "./uninstall";
+import {setStorageVal} from "../protyle/util/compatibility";
+import {getAllEditor} from "../layout/getAll";
 
 const requireFunc = (key: string) => {
     const modules = {
@@ -25,19 +27,20 @@ const runCode = (code: string, sourceURL: string) => {
     return window.eval("(function anonymous(require, module, exports){".concat(code, "\n})\n//# sourceURL=").concat(sourceURL, "\n"));
 };
 
-export const loadPlugins = async (app: App) => {
+export const loadPlugins = async (app: App, names?: string[], init = true) => {
     const response = await fetchSyncPost("/api/petal/loadPetals", {frontend: getFrontend()});
-    let css = "";
-    // 为加快启动速度，不进行 await
-    response.data.forEach((item: IPluginData) => {
-        loadPluginJS(app, item);
-        css += item.css || "" + "\n";
-    });
-    const pluginsStyle = document.getElementById("pluginsStyle");
-    if (pluginsStyle) {
-        pluginsStyle.innerHTML = css;
-    } else {
-        document.head.insertAdjacentHTML("beforeend", `<style id="pluginsStyle">${css}</style>`);
+    const pluginsStyle = getPluginsStyle();
+    for (let i = 0; i < response.data.length; i++) {
+        const item = response.data[i] as IPluginData;
+        if (!names || (names && names.includes(item.name))) {
+            if (init) {
+                // 初始化时为加快启动速度，已特殊处理，不进行 await
+                loadPluginJS(app, item);
+            } else {
+                await loadPluginJS(app, item);
+            }
+            insertPluginCSS(item, pluginsStyle);
+        }
     }
 };
 
@@ -64,7 +67,7 @@ const loadPluginJS = async (app: App, item: IPluginData) => {
         displayName: item.displayName,
         name: item.name,
         i18n: item.i18n
-    });
+    }) as Plugin;
     app.plugins.push(plugin);
     try {
         await plugin.onload();
@@ -74,21 +77,41 @@ const loadPluginJS = async (app: App, item: IPluginData) => {
     return plugin;
 };
 
+const getPluginsStyle = () => {
+    let pluginsStyle = document.getElementById("pluginsStyle");
+    if (!pluginsStyle) {
+        pluginsStyle = document.createElement("style");
+        pluginsStyle.id = "pluginsStyle"; // 用于将内联样式插入到插件样式前的标识
+        document.head.append(pluginsStyle);
+    }
+    return pluginsStyle;
+};
+
+const insertPluginCSS = (item: IPluginData, pluginsStyle: HTMLElement) => {
+    if (!item.css) {
+        return;
+    }
+    const styleElement = document.createElement("style");
+    styleElement.id = "pluginsStyle" + item.name;
+    styleElement.textContent = item.css;
+    pluginsStyle.insertAdjacentElement("afterend", styleElement);
+};
+
 // 启用插件
 export const loadPlugin = async (app: App, item: IPluginData) => {
     const plugin = await loadPluginJS(app, item);
-    const styleElement = document.createElement("style");
-    styleElement.textContent = item.css;
-    document.head.append(styleElement);
+    insertPluginCSS(item, getPluginsStyle());
     afterLoadPlugin(plugin);
     saveLayout();
+    getAllEditor().forEach(editor => {
+        editor.protyle.toolbar.update(editor.protyle);
+    });
     return plugin;
 };
 
-
-const updateDock = (dockItem: IDockTab[], index: number, plugin: Plugin, type: string) => {
+const updateDock = (dockItem: Config.IUILayoutDockTab[], index: number, plugin: Plugin, type: string) => {
     const dockKeys = Object.keys(plugin.docks);
-    dockItem.forEach((tabItem: IDockTab, tabIndex: number) => {
+    dockItem.forEach((tabItem: Config.IUILayoutDockTab, tabIndex: number) => {
         if (dockKeys.includes(tabItem.type)) {
             if (type === "Left") {
                 plugin.docks[tabItem.type].config.position = index === 0 ? "LeftTop" : "LeftBottom";
@@ -100,44 +123,13 @@ const updateDock = (dockItem: IDockTab[], index: number, plugin: Plugin, type: s
             plugin.docks[tabItem.type].config.index = tabIndex;
             plugin.docks[tabItem.type].config.show = tabItem.show;
             plugin.docks[tabItem.type].config.size = tabItem.size;
+            if (!window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name]) {
+                window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name] = {};
+            }
+            window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name][tabItem.type] = plugin.docks[tabItem.type].config;
+            setStorageVal(Constants.LOCAL_PLUGIN_DOCKS, window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS]);
         }
     });
-};
-
-const mergePluginHotkey = (plugin: Plugin) => {
-    if (!window.siyuan.config.keymap.plugin) {
-        window.siyuan.config.keymap.plugin = {};
-    }
-    for (let i = 0; i < plugin.commands.length; i++) {
-        const command = plugin.commands[i];
-        if (!window.siyuan.config.keymap.plugin[plugin.name]) {
-            command.customHotkey = command.hotkey;
-            window.siyuan.config.keymap.plugin[plugin.name] = {
-                [command.langKey]: {
-                    default: command.hotkey,
-                    custom: command.hotkey,
-                }
-            };
-        } else if (!window.siyuan.config.keymap.plugin[plugin.name][command.langKey]) {
-            command.customHotkey = command.hotkey;
-            window.siyuan.config.keymap.plugin[plugin.name][command.langKey] = {
-                default: command.hotkey,
-                custom: command.hotkey,
-            };
-        } else if (window.siyuan.config.keymap.plugin[plugin.name][command.langKey]) {
-            if (typeof window.siyuan.config.keymap.plugin[plugin.name][command.langKey].custom === "string") {
-                command.customHotkey = window.siyuan.config.keymap.plugin[plugin.name][command.langKey].custom;
-            } else {
-                command.customHotkey = command.hotkey;
-            }
-            window.siyuan.config.keymap.plugin[plugin.name][command.langKey]["default"] = command.hotkey;
-        }
-        if (typeof command.customHotkey !== "string") {
-            console.error(`${plugin.name} - commands data is error and has been removed.`);
-            plugin.commands.splice(i, 1);
-            i--;
-        }
-    }
 };
 
 export const afterLoadPlugin = (plugin: Plugin) => {
@@ -148,37 +140,30 @@ export const afterLoadPlugin = (plugin: Plugin) => {
     }
 
     if (!isWindow() || isMobile()) {
-        const unPinMenu: IMenu[] = [];
         plugin.topBarIcons.forEach(element => {
+            if (document.contains(element)) {
+                return;
+            }
             if (isMobile()) {
-                if (window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN].includes(element.id)) {
-                    unPinMenu.push({
-                        iconHTML: element.firstElementChild.outerHTML,
-                        label: element.textContent.trim(),
-                        click() {
-                            element.dispatchEvent(new CustomEvent("click"));
-                        }
-                    });
-                } else {
+                if (!window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN].includes(element.id)) {
                     document.querySelector("#menuAbout").after(element);
                 }
             } else if (!isWindow()) {
                 if (window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN].includes(element.id)) {
                     element.classList.add("fn__none");
                 }
-                document.querySelector("#" + (element.getAttribute("data-position") === "right" ? "barPlugins" : "drag")).before(element);
+                document.querySelector("#" + (element.getAttribute("data-location") === "right" ? "barPlugins" : "drag")).before(element);
             }
         });
-        if (isMobile() && unPinMenu.length > 0) {
-            return unPinMenu;
-        }
     }
     /// #if !MOBILE
     resizeTopBar();
-    mergePluginHotkey(plugin);
     plugin.statusBarIcons.forEach(element => {
+        if (document.contains(element)) {
+            return;
+        }
         const statusElement = document.getElementById("status");
-        if (element.getAttribute("data-position") === "right") {
+        if (element.getAttribute("data-location") === "right") {
             statusElement.insertAdjacentElement("beforeend", element);
         } else {
             statusElement.insertAdjacentElement("afterbegin", element);
@@ -190,17 +175,21 @@ export const afterLoadPlugin = (plugin: Plugin) => {
     }
 
     /// #if !MOBILE
-    window.siyuan.config.uiLayout.left.data.forEach((dockItem: IDockTab[], index: number) => {
+    window.siyuan.config.uiLayout.left.data.forEach((dockItem: Config.IUILayoutDockTab[], index: number) => {
         updateDock(dockItem, index, plugin, "Left");
     });
-    window.siyuan.config.uiLayout.right.data.forEach((dockItem: IDockTab[], index: number) => {
+    window.siyuan.config.uiLayout.right.data.forEach((dockItem: Config.IUILayoutDockTab[], index: number) => {
         updateDock(dockItem, index, plugin, "Right");
     });
-    window.siyuan.config.uiLayout.bottom.data.forEach((dockItem: IDockTab[], index: number) => {
+    window.siyuan.config.uiLayout.bottom.data.forEach((dockItem: Config.IUILayoutDockTab[], index: number) => {
         updateDock(dockItem, index, plugin, "Bottom");
     });
     Object.keys(plugin.docks).forEach(key => {
+        if (window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name] && window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name][key]) {
+            plugin.docks[key].config = window.siyuan.storage[Constants.LOCAL_PLUGIN_DOCKS][plugin.name][key];
+        }
         const dock = plugin.docks[key];
+        const hotkey = window.siyuan.config.keymap.plugin[plugin.name] ? window.siyuan.config.keymap.plugin[plugin.name][key]?.custom : undefined;
         if (dock.config.position.startsWith("Left")) {
             window.siyuan.layout.leftDock.genButton([{
                 type: key,
@@ -208,7 +197,7 @@ export const afterLoadPlugin = (plugin: Plugin) => {
                 show: dock.config.show,
                 icon: dock.config.icon,
                 title: dock.config.title,
-                hotkey: dock.config.hotkey
+                hotkey
             }], dock.config.position === "LeftBottom" ? 1 : 0, dock.config.index);
         } else if (dock.config.position.startsWith("Bottom")) {
             window.siyuan.layout.bottomDock.genButton([{
@@ -217,7 +206,7 @@ export const afterLoadPlugin = (plugin: Plugin) => {
                 show: dock.config.show,
                 icon: dock.config.icon,
                 title: dock.config.title,
-                hotkey: dock.config.hotkey
+                hotkey
             }], dock.config.position === "BottomRight" ? 1 : 0, dock.config.index);
         } else if (dock.config.position.startsWith("Right")) {
             window.siyuan.layout.rightDock.genButton([{
@@ -226,21 +215,49 @@ export const afterLoadPlugin = (plugin: Plugin) => {
                 show: dock.config.show,
                 icon: dock.config.icon,
                 title: dock.config.title,
-                hotkey: dock.config.hotkey
+                hotkey
             }], dock.config.position === "RightBottom" ? 1 : 0, dock.config.index);
         }
     });
     /// #endif
 };
 
-export const reloadPlugin = (app: App) => {
-    app.plugins.forEach((item) => {
-        uninstall(this, item.name);
+export const reloadPlugin = async (app: App, data: {
+    upsertCodePlugins?: string[],
+    upsertDataPlugins?: string[],
+    unloadPlugins?: string[],
+    uninstallPlugins?: string[],
+} = {}) => {
+    const {upsertCodePlugins = [], upsertDataPlugins = [], unloadPlugins = [], uninstallPlugins = []} = data;
+    // 禁用
+    unloadPlugins.forEach((item) => {
+        uninstall(app, item, true);
     });
-    loadPlugins(this).then(() => {
+    // 卸载
+    uninstallPlugins.forEach((item) => {
+        uninstall(app, item, false);
+    });
+    upsertCodePlugins.forEach((item) => {
+        uninstall(app, item, true);
+    });
+    loadPlugins(app, upsertCodePlugins, false).then(() => {
         app.plugins.forEach(item => {
-            afterLoadPlugin(item);
+            if (upsertCodePlugins.includes(item.name)) {
+                afterLoadPlugin(item);
+                getAllEditor().forEach(editor => {
+                    editor.protyle.toolbar.update(editor.protyle);
+                });
+            }
         });
+    });
+    app.plugins.forEach(item => {
+        if (upsertDataPlugins.includes(item.name)) {
+            try {
+                item.onDataChanged();
+            } catch (e) {
+                console.error(`plugin ${item.name} onDataChanged error:`, e);
+            }
+        }
     });
     /// #if !MOBILE
     saveLayout();
