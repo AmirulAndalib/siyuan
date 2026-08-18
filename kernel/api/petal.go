@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/88250/gulu"
+	"github.com/emirpasic/gods/sets/hashset"
 	"github.com/gin-gonic/gin"
 	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/util"
@@ -34,10 +35,13 @@ func loadPetals(c *gin.Context) {
 		return
 	}
 
-	frontend := arg["frontend"].(string)
+	var frontend string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("frontend", &frontend, true, true)) {
+		return
+	}
+	isPublish := model.IsReadOnlyRoleContext(c)
 
-	petals := model.LoadPetals(frontend)
-	ret.Data = petals
+	ret.Data = model.LoadPetals(frontend, isPublish)
 }
 
 func setPetalEnabled(c *gin.Context) {
@@ -49,15 +53,58 @@ func setPetalEnabled(c *gin.Context) {
 		return
 	}
 
-	packageName := arg["packageName"].(string)
-	enabled := arg["enabled"].(bool)
-	frontend := arg["frontend"].(string)
-	data, err := model.SetPetalEnabled(packageName, enabled, frontend)
-	if nil != err {
+	var packageName, app string
+	var enabled bool
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("packageName", &packageName, true, true),
+		util.BindJsonArg("enabled", &enabled, true, false),
+		util.BindJsonArg("app", &app, false, false),
+	) {
+		return
+	}
+
+	data, err := model.SetPetalEnabled(packageName, enabled)
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
 
 	ret.Data = data
+	if enabled {
+		reloadPluginSet := hashset.New(packageName)
+		model.PushReloadPlugin(nil, nil, reloadPluginSet, nil, app)
+	} else {
+		unloadPluginSet := hashset.New(packageName)
+		model.PushReloadPlugin(nil, unloadPluginSet, nil, nil, app)
+	}
+}
+
+func setPetalPublishEnabled(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var packageName string
+	var enabled bool
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("packageName", &packageName, true, true),
+		util.BindJsonArg("enabled", &enabled, true, false),
+	) {
+		return
+	}
+
+	data, err := model.SetPetalPublishEnabled(packageName, enabled)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	ret.Data = data
+	util.ReloadPublishServiceSessions()
 }

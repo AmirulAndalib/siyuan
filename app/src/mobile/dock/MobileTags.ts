@@ -3,14 +3,21 @@ import {fetchPost} from "../../util/fetch";
 import {hasClosestByClassName} from "../../protyle/util/hasClosest";
 import {MenuItem} from "../../menus/Menu";
 import {popSearch} from "../menu/search";
-import {Constants} from "../../constants";
-import {App} from "../../index";
+import type {App} from "../../index";
 import {openTagMenu} from "../../menus/tag";
+import {Constants} from "../../constants";
+import {filterTagData, getTagFilterKeywords} from "../../layout/dock/tagFilter";
 
 export class MobileTags {
     public element: HTMLElement;
     private tree: Tree;
     private openNodes: string[];
+    private preFilterOpenNodes: string[];
+    private data: IBlockTree[] = [];
+    private filterData: IBlockTree[];
+    private updating = false;
+    private pendingUpdate: boolean;
+    private filterLoadPending = false;
 
     constructor(app: App) {
         this.element = document.querySelector('#sidebar [data-type="sidebar-tag"]');
@@ -20,6 +27,9 @@ export class MobileTags {
         ${window.siyuan.languages.tag}
     </div>
     <span class="fn__space"></span>
+    <input class="b3-text-field search__label fn__none fn__size200" placeholder="${window.siyuan.languages.filterKeywordEnter}" />
+    <svg data-type="search" class="toolbar__icon"><use xlink:href='#iconFilter'></use></svg>
+    <span class="fn__space"></span>
     <svg data-type="expand" class="toolbar__icon"><use xlink:href="#iconExpand"></use></svg>
     <span class="fn__space"></span>
     <svg data-type="collapse" class="toolbar__icon"><use xlink:href="#iconContract"></use></svg>
@@ -28,6 +38,23 @@ export class MobileTags {
 </div>
 <div class="fn__flex-1 tagList"></div>
 <img style="position: absolute;top: 0;left: 0;height: 100%;width: 100%;padding: 30vw;box-sizing: border-box;" src="/stage/loading-pure.svg">`;
+        const inputElement = this.element.querySelector("input.b3-text-field.search__label") as HTMLInputElement;
+        inputElement.addEventListener("blur", () => {
+            inputElement.classList.add("fn__none");
+            const filterIconElement = inputElement.nextElementSibling as HTMLElement;
+            const value = inputElement.value;
+            if (value.trim()) {
+                filterIconElement.classList.add("toolbar__icon--active");
+            } else {
+                filterIconElement.classList.remove("toolbar__icon--active");
+            }
+        });
+        inputElement.addEventListener("input", (event: InputEvent) => {
+            if (!event.isComposing) {
+                this.filter();
+            }
+        });
+        inputElement.addEventListener("compositionend", () => this.filter());
 
         this.tree = new Tree({
             element: this.element.querySelector(".tagList") as HTMLElement,
@@ -41,11 +68,7 @@ export class MobileTags {
                         return;
                     }
                 }
-                const searchOption = window.siyuan.storage[Constants.LOCAL_SEARCHDATA];
                 popSearch(app, {
-                    removed: searchOption.removed,
-                    sort: searchOption.sort,
-                    group: searchOption.group,
                     hasReplace: false,
                     method: 0,
                     hPath: "",
@@ -53,14 +76,15 @@ export class MobileTags {
                     k: `#${labelName}#`,
                     r: "",
                     page: 1,
-                    types: Object.assign({}, searchOption.types),
-                    replaceTypes: Object.assign({}, searchOption.replaceTypes)
                 });
             },
             blockExtHTML: window.siyuan.config.readonly ? undefined : '<span class="b3-list-item__action"><svg><use xlink:href="#iconMore"></use></svg></span>',
             topExtHTML: window.siyuan.config.readonly ? undefined : '<span class="b3-list-item__action"><svg><use xlink:href="#iconMore"></use></svg></span>'
         });
         this.element.addEventListener("click", (event) => {
+            if ((event.target as HTMLElement).tagName === "INPUT") {
+                return;
+            }
             let target = event.target as HTMLElement;
             while (target && !target.isEqualNode(this.element)) {
                 if (target.classList.contains("toolbar__icon")) {
@@ -75,6 +99,10 @@ export class MobileTags {
                             this.tree.expandAll();
                             event.preventDefault();
                             event.stopPropagation();
+                            break;
+                        case "search":
+                            inputElement.classList.remove("fn__none");
+                            inputElement.select();
                             break;
                         case "sort":
                             window.siyuan.menus.menu.remove();
@@ -135,24 +163,102 @@ export class MobileTags {
                 target = target.parentElement;
             }
         });
-        this.update();
+        this.update(false);
     }
 
-    public update() {
+    public update(ignoreMaxListHint = true) {
+        if (this.updating) {
+            this.pendingUpdate = ignoreMaxListHint;
+            return;
+        }
+        this.updating = true;
+        const inputElement = this.element.querySelector("input.b3-text-field.search__label") as HTMLInputElement;
+        const ignoreMaxListHintArg = getTagFilterKeywords(inputElement.value).length > 0 || ignoreMaxListHint;
         this.element.lastElementChild.classList.remove("fn__none");
         fetchPost("/api/tag/getTag", {
-            sort: window.siyuan.config.tag.sort
+            sort: window.siyuan.config.tag.sort,
+            app: Constants.SIYUAN_APPID,
+            ignoreMaxListHint: ignoreMaxListHintArg,
         }, response => {
-            if (this.openNodes) {
-                this.openNodes = this.tree.getExpandIds();
+            if (this.pendingUpdate !== undefined) {
+                const pendingUpdate = this.pendingUpdate;
+                this.pendingUpdate = undefined;
+                this.updating = false;
+                this.update(pendingUpdate);
+                return;
             }
-            this.tree.updateData(response.data);
-            if (this.openNodes) {
-                this.tree.setExpandIds(this.openNodes);
-            } else {
-                this.openNodes = this.tree.getExpandIds();
+            this.data = response.data;
+            this.filterData = ignoreMaxListHintArg ? response.data : undefined;
+            this.filter();
+            this.updating = false;
+            this.element.lastElementChild.classList.add("fn__none");
+            if (this.filterLoadPending) {
+                this.filterLoadPending = false;
+                this.loadFilterData();
             }
+        });
+    }
+
+    private loadFilterData() {
+        const inputElement = this.element.querySelector("input.b3-text-field.search__label") as HTMLInputElement;
+        if (getTagFilterKeywords(inputElement.value).length === 0 || this.filterData) {
+            this.filter();
+            return;
+        }
+        if (this.updating) {
+            this.filterLoadPending = true;
+            return;
+        }
+        this.updating = true;
+        this.element.lastElementChild.classList.remove("fn__none");
+        fetchPost("/api/tag/getTag", {
+            sort: window.siyuan.config.tag.sort,
+            app: Constants.SIYUAN_APPID,
+            ignoreMaxListHint: true,
+        }, response => {
+            if (this.pendingUpdate !== undefined) {
+                const pendingUpdate = this.pendingUpdate;
+                this.pendingUpdate = undefined;
+                this.filterLoadPending = false;
+                this.updating = false;
+                this.update(pendingUpdate);
+                return;
+            }
+            this.filterData = response.data;
+            this.filterLoadPending = false;
+            this.filter();
+            this.updating = false;
             this.element.lastElementChild.classList.add("fn__none");
         });
+    }
+
+    private filter() {
+        const inputElement = this.element.querySelector("input.b3-text-field.search__label") as HTMLInputElement;
+        const keywords = getTagFilterKeywords(inputElement.value);
+        const hasKeyword = keywords.length > 0;
+        if (hasKeyword && this.preFilterOpenNodes === undefined && this.openNodes !== undefined) {
+            this.preFilterOpenNodes = this.tree.getExpandIds();
+        } else if (!hasKeyword && this.preFilterOpenNodes === undefined && this.openNodes !== undefined) {
+            this.openNodes = this.tree.getExpandIds();
+        }
+        if (hasKeyword && !this.filterData) {
+            this.loadFilterData();
+            return;
+        }
+        const data = hasKeyword ? filterTagData(this.filterData, keywords) : this.data;
+        this.tree.updateData(data);
+        if (hasKeyword) {
+            this.tree.expandAll();
+        } else if (this.preFilterOpenNodes !== undefined) {
+            this.tree.collapseAll();
+            this.tree.setExpandIds(this.preFilterOpenNodes);
+            this.openNodes = this.preFilterOpenNodes;
+            this.preFilterOpenNodes = undefined;
+        } else if (this.openNodes !== undefined) {
+            this.tree.collapseAll();
+            this.tree.setExpandIds(this.openNodes);
+        } else {
+            this.openNodes = this.tree.getExpandIds();
+        }
     }
 }

@@ -5,11 +5,12 @@ import {Constants} from "../constants";
 import {showMessage} from "../dialog/message";
 import {fetchPost} from "../util/fetch";
 import {escapeHtml} from "../util/escape";
-import {setStorageVal} from "../protyle/util/compatibility";
+import {isSensitiveSearchConfig, setStorageVal} from "../protyle/util/compatibility";
 import {confirmDialog} from "../dialog/confirmDialog";
-import {updateSearchResult} from "../mobile/menu/search";
+import {goUnRef, updateSearchResult} from "../mobile/menu/search";
+import {getDefaultSubType} from "./getDefault";
 
-export const filterMenu = (config: ISearchOption, cb: () => void) => {
+export const filterMenu = (config: Config.IUILayoutTabSearchConfig, cb: () => void) => {
     const filterDialog = new Dialog({
         title: window.siyuan.languages.searchType,
         content: `<div class="b3-dialog__content">
@@ -32,24 +33,6 @@ export const filterMenu = (config: ISearchOption, cb: () => void) => {
         <input class="b3-switch fn__flex-center" data-type="table" type="checkbox"${config.types.table ? " checked" : ""}>
     </label>
     <label class="fn__flex b3-label">
-        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconQuote"></use></svg>
-        <span class="fn__space"></span>
-        <div class="fn__flex-1 fn__flex-center">
-            ${window.siyuan.languages.quote}
-        </div>
-        <span class="fn__space"></span>
-        <input class="b3-switch fn__flex-center" data-type="blockquote" type="checkbox"${config.types.blockquote ? " checked" : ""}>
-    </label>
-    <label class="fn__flex b3-label">
-        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconSuper"></use></svg>
-        <span class="fn__space"></span>
-        <div class="fn__flex-1 fn__flex-center">
-            ${window.siyuan.languages.superBlock}
-        </div>
-        <span class="fn__space"></span>
-        <input class="b3-switch fn__flex-center" data-type="superBlock" type="checkbox"${config.types.superBlock ? " checked" : ""}>
-    </label>
-    <label class="fn__flex b3-label">
         <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconParagraph"></use></svg>
         <span class="fn__space"></span>
         <div class="fn__flex-1 fn__flex-center">
@@ -58,16 +41,10 @@ export const filterMenu = (config: ISearchOption, cb: () => void) => {
         <span class="fn__space"></span>
         <input class="b3-switch fn__flex-center" data-type="paragraph" type="checkbox"${config.types.paragraph ? " checked" : ""}>
     </label>
-    <label class="fn__flex b3-label">
-        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconFile"></use></svg>
-        <span class="fn__space"></span>
-        <div class="fn__flex-1 fn__flex-center">
-            ${window.siyuan.languages.doc}
-        </div>
-        <span class="fn__space"></span>
-        <input class="b3-switch fn__flex-center" data-type="document" type="checkbox"${config.types.document ? " checked" : ""}>
-    </label>
-    <label class="fn__flex b3-label">
+    <div class="fn__flex b3-label">
+        <span style="margin:0 4px 0 -20px" class="b3-list-item__toggle b3-list-item__toggle--hl fn__pointer">
+            <svg class="b3-list-item__arrow"><use xlink:href="#iconRight"></use></svg>
+        </span>
         <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconHeadings"></use></svg>
         <span class="fn__space"></span>
         <div class="fn__flex-1 fn__flex-center">
@@ -75,25 +52,17 @@ export const filterMenu = (config: ISearchOption, cb: () => void) => {
         </div>
         <span class="fn__space"></span>
         <input class="b3-switch fn__flex-center" data-type="heading" type="checkbox"${config.types.heading ? " checked" : ""}>
-    </label>
-    <label class="fn__flex b3-label">
-        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconList"></use></svg>
-        <span class="fn__space"></span>
-        <div class="fn__flex-1 fn__flex-center">
-            ${window.siyuan.languages.list1}
-        </div>
-        <span class="fn__space"></span>
-        <input class="b3-switch fn__flex-center" data-type="list" type="checkbox"${config.types.list ? " checked" : ""}>
-    </label>
-    <label class="fn__flex b3-label">
-        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconListItem"></use></svg>
-        <span class="fn__space"></span>
-        <div class="fn__flex-1 fn__flex-center">
-            ${window.siyuan.languages.listItem}
-        </div>
-        <span class="fn__space"></span>
-        <input class="b3-switch fn__flex-center" data-type="listItem" type="checkbox"${config.types.listItem ? " checked" : ""}>
-    </label>
+    </div>
+    <div class="fn__none" style="padding-left: 20px">
+        ${(["h1", "h2", "h3", "h4", "h5", "h6"] as const).map((h) => `
+        <label class="fn__flex b3-label">
+            <div class="fn__flex-1 fn__flex-center">
+                ${window.siyuan.languages["heading" + h.charAt(1)]}
+            </div>
+            <span class="fn__space"></span>
+            <input class="b3-switch fn__flex-center" data-subtype="${h}" type="checkbox"${config.subTypes?.[h] ? " checked" : ""}>
+        </label>`).join("")}<div></div>
+    </div>
     <label class="fn__flex b3-label">
         <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconCode"></use></svg>
         <span class="fn__space"></span>
@@ -113,6 +82,15 @@ export const filterMenu = (config: ISearchOption, cb: () => void) => {
         <input class="b3-switch fn__flex-center" data-type="htmlBlock" type="checkbox"${config.types.htmlBlock ? " checked" : ""}>
     </label>
     <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconDatabase"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.database}
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="databaseBlock" type="checkbox"${config.types.databaseBlock ? " checked" : ""}>
+    </label>    
+    <label class="fn__flex b3-label">
         <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconSQL"></use></svg>
         <span class="fn__space"></span>
         <div class="fn__flex-1 fn__flex-center">
@@ -122,39 +100,203 @@ export const filterMenu = (config: ISearchOption, cb: () => void) => {
         <input class="b3-switch fn__flex-center" data-type="embedBlock" type="checkbox"${config.types.embedBlock ? " checked" : ""}>
     </label>
     <label class="fn__flex b3-label">
-        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconDatabase"></use></svg>
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconVideo"></use></svg>
         <span class="fn__space"></span>
         <div class="fn__flex-1 fn__flex-center">
-            ${window.siyuan.languages.database}
+            ${window.siyuan.languages.video}
         </div>
         <span class="fn__space"></span>
-        <input class="b3-switch fn__flex-center" data-type="databaseBlock" type="checkbox"${config.types.databaseBlock ? " checked" : ""}>
+        <input class="b3-switch fn__flex-center" data-type="videoBlock" type="checkbox"${config.types.videoBlock ? " checked" : ""}>
     </label>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconRecord"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.audio}
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="audioBlock" type="checkbox"${config.types.audioBlock ? " checked" : ""}>
+    </label>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconGlobe"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            IFrame
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="iframeBlock" type="checkbox"${config.types.iframeBlock ? " checked" : ""}>
+    </label>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconBoth"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.widget}
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="widgetBlock" type="checkbox"${config.types.widgetBlock ? " checked" : ""}>
+    </label>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconQuote"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.quote} <sup>[1]</sup>
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="blockquote" type="checkbox"${config.types.blockquote ? " checked" : ""}>
+    </label>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconCallout"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.callout} <sup>[1]</sup>
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="callout" type="checkbox"${config.types.callout ? " checked" : ""}>
+    </label>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconSuper"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.superBlock} <sup>[1]</sup>
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="superBlock" type="checkbox"${config.types.superBlock ? " checked" : ""}>
+    </label>
+    <div class="fn__flex b3-label">
+        <span style="margin:0 4px 0 -20px" class="b3-list-item__toggle b3-list-item__toggle--hl fn__pointer" data-toggle-subtype="list">
+            <svg class="b3-list-item__arrow"><use xlink:href="#iconRight"></use></svg>
+        </span>
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconList"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.list1} <sup>[1] [2]</sup>
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="list" type="checkbox"${config.types.list ? " checked" : ""}>
+    </div>
+    <div class="fn__none" style="padding-left: 20px;">
+        <label class="fn__flex b3-label">
+            <div class="fn__flex-1 fn__flex-center">${window.siyuan.languages["ordered-list"]}</div>
+            <span class="fn__space"></span>
+            <input class="b3-switch fn__flex-center" data-subtype="o" type="checkbox"${config.subTypes?.o ? " checked" : ""}>
+        </label>
+        <label class="fn__flex b3-label">
+            <div class="fn__flex-1 fn__flex-center">${window.siyuan.languages.unorderedList}</div>
+            <span class="fn__space"></span>
+            <input class="b3-switch fn__flex-center" data-subtype="u" type="checkbox"${config.subTypes?.u ? " checked" : ""}>
+        </label>
+        <label class="fn__flex b3-label">
+            <div class="fn__flex-1 fn__flex-center">${window.siyuan.languages.check}</div>
+            <span class="fn__space"></span>
+            <input class="b3-switch fn__flex-center" data-subtype="t" type="checkbox"${config.subTypes?.t ? " checked" : ""}>
+        </label>
+        <div></div>
+    </div>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconListItem"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.listItem} <sup>[1]</sup>
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="listItem" type="checkbox"${config.types.listItem ? " checked" : ""}>
+    </label>
+    <label class="fn__flex b3-label">
+        <svg class="ft__on-surface svg fn__flex-center"><use xlink:href="#iconFile"></use></svg>
+        <span class="fn__space"></span>
+        <div class="fn__flex-1 fn__flex-center">
+            ${window.siyuan.languages.doc}
+        </div>
+        <span class="fn__space"></span>
+        <input class="b3-switch fn__flex-center" data-type="document" type="checkbox"${config.types.document ? " checked" : ""}>
+    </label>
+    <span class="fn__space"></span>
+    <div class="fn__flex-1">
+        <div class="b3-label__text">[1] ${window.siyuan.languages.containerBlockTip1}</div>
+        <div class="b3-label__text">[2] ${window.siyuan.languages.searchSubTypeListTip}</div>
+    </div>
 </div>
 <div class="b3-dialog__action">
     <button class="b3-button b3-button--cancel">${window.siyuan.languages.cancel}</button><div class="fn__space"></div>
     <button class="b3-button b3-button--text">${window.siyuan.languages.confirm}</button>
 </div>`,
-        width: isMobile() ? "92vw" : "520px",
+        width: isMobile() ? "92vw" : "600px",
         height: "70vh",
     });
     filterDialog.element.setAttribute("data-key", Constants.DIALOG_SEARCHTYPE);
+    filterDialog.element.querySelectorAll(".b3-list-item__toggle--hl").forEach((item: HTMLElement) => {
+        item.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            item.parentElement.nextElementSibling.classList.toggle("fn__none");
+            item.firstElementChild.classList.toggle("b3-list-item__arrow--open");
+        });
+    });
+    // Keep parent and subtype toggles in sync.
+    filterDialog.element.querySelectorAll("input[data-subtype]").forEach((item: HTMLInputElement) => {
+        item.addEventListener("change", () => {
+            if (!item.checked) {
+                return;
+            }
+            ({
+                h1: ["heading"], h2: ["heading"], h3: ["heading"],
+                h4: ["heading"], h5: ["heading"], h6: ["heading"],
+                o: ["list", "listItem"],
+                u: ["list", "listItem"],
+                t: ["list", "listItem"],
+            })[item.getAttribute("data-subtype")].forEach((parentType) => {
+                const parentElement = filterDialog.element.querySelector(`input[data-type="${parentType}"]`) as HTMLInputElement;
+                if (parentElement && !parentElement.checked) {
+                    parentElement.checked = true;
+                }
+            });
+        });
+    });
+    const parentSubtypes: Record<string, string[]> = {
+        heading: ["h1", "h2", "h3", "h4", "h5", "h6"],
+        list: ["o", "u", "t"],
+        listItem: ["o", "u", "t"],
+    };
+    Object.keys(parentSubtypes).forEach((key) => {
+        const parentElement = filterDialog.element.querySelector(`input[data-type="${key}"]`) as HTMLInputElement;
+        parentElement.addEventListener("change", () => {
+            if (parentElement.checked) {
+                return;
+            }
+            parentSubtypes[key].forEach((subtype) => {
+                const subtypeBox = filterDialog.element.querySelector(`input[data-subtype="${subtype}"]`) as HTMLInputElement;
+                if (subtypeBox && subtypeBox.checked) {
+                    subtypeBox.checked = false;
+                }
+            });
+        });
+    });
     const btnsElement = filterDialog.element.querySelectorAll(".b3-button");
     btnsElement[0].addEventListener("click", () => {
         filterDialog.destroy();
     });
     btnsElement[1].addEventListener("click", () => {
+        if (!config.subTypes) {
+            config.subTypes = getDefaultSubType();
+        }
         filterDialog.element.querySelectorAll(".b3-switch").forEach((item: HTMLInputElement) => {
-            config.types[item.getAttribute("data-type") as TSearchFilter] = item.checked;
+            const subtype = item.getAttribute("data-subtype");
+            if (subtype) {
+                config.subTypes[subtype as keyof Config.IUILayoutTabSearchConfigSubTypes] = item.checked;
+            } else {
+                config.types[item.getAttribute("data-type") as keyof (typeof config.types)] = item.checked;
+            }
         });
         cb();
+        window.siyuan.storage[Constants.LOCAL_SEARCHDATA] = Object.assign({}, config);
+        setStorageVal(Constants.LOCAL_SEARCHDATA, window.siyuan.storage[Constants.LOCAL_SEARCHDATA]);
         filterDialog.destroy();
     });
 };
 
-export const replaceFilterMenu = (config: ISearchOption) => {
+export const replaceFilterMenu = (config: Config.IUILayoutTabSearchConfig) => {
     let html = "";
-    Object.keys(Constants.SIYUAN_DEFAULT_REPLACETYPES).forEach((key) => {
+    Object.keys(Constants.SIYUAN_DEFAULT_REPLACETYPES).forEach((key: keyof Config.IUILayoutTabSearchConfigReplaceTypes) => {
         html += `<label class="fn__flex b3-label">
     <span class="fn__space"></span>
     <div class="fn__flex-1 fn__flex-center">
@@ -181,22 +323,24 @@ export const replaceFilterMenu = (config: ISearchOption) => {
     });
     btnsElement[1].addEventListener("click", () => {
         filterDialog.element.querySelectorAll(".b3-switch").forEach((item: HTMLInputElement) => {
-            config.replaceTypes[item.getAttribute("data-type") as TSearchFilter] = item.checked;
+            config.replaceTypes[item.getAttribute("data-type") as keyof (typeof config.replaceTypes)] = item.checked;
         });
+        window.siyuan.storage[Constants.LOCAL_SEARCHDATA] = Object.assign({}, config);
+        setStorageVal(Constants.LOCAL_SEARCHDATA, window.siyuan.storage[Constants.LOCAL_SEARCHDATA]);
         filterDialog.destroy();
     });
 };
 
-export const queryMenu = (config: ISearchOption, cb: () => void) => {
+export const queryMenu = (config: Config.IUILayoutTabSearchConfig, cb: () => void) => {
     if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
-        window.siyuan.menus.menu.element.getAttribute("data-name") === "searchMethod") {
+        window.siyuan.menus.menu.element.getAttribute("data-name") === Constants.MENU_SEARCH_METHOD) {
         window.siyuan.menus.menu.remove();
         return;
     }
     window.siyuan.menus.menu.remove();
-    window.siyuan.menus.menu.element.setAttribute("data-name", "searchMethod");
+    window.siyuan.menus.menu.element.setAttribute("data-name", Constants.MENU_SEARCH_METHOD);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: "",
+        icon: "iconExact",
         label: window.siyuan.languages.keyword,
         current: config.method === 0,
         click() {
@@ -205,7 +349,7 @@ export const queryMenu = (config: ISearchOption, cb: () => void) => {
         }
     }).element);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: "",
+        icon: "iconQuote",
         label: window.siyuan.languages.querySyntax,
         current: config.method === 1,
         click() {
@@ -214,7 +358,7 @@ export const queryMenu = (config: ISearchOption, cb: () => void) => {
         }
     }).element);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: "",
+        icon: "iconDatabase",
         label: "SQL",
         current: config.method === 2,
         click() {
@@ -223,7 +367,7 @@ export const queryMenu = (config: ISearchOption, cb: () => void) => {
         }
     }).element);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: "",
+        icon: "iconRegex",
         label: window.siyuan.languages.regex,
         current: config.method === 3,
         click() {
@@ -231,10 +375,21 @@ export const queryMenu = (config: ISearchOption, cb: () => void) => {
             cb();
         }
     }).element);
+    if (window.siyuan.config.ai.embedding.enabled) {
+        window.siyuan.menus.menu.append(new MenuItem({
+            icon: "iconSparkles",
+            label: window.siyuan.languages.semanticSearch,
+            current: config.method === 4,
+            click() {
+                config.method = 4;
+                cb();
+            }
+        }).element);
+    }
 };
 
-const saveCriterionData = (config: ISearchOption,
-                           criteriaData: ISearchOption[],
+const saveCriterionData = (config: Config.IUILayoutTabSearchConfig,
+                           criteriaData: Config.IUILayoutTabSearchConfig[],
                            element: Element,
                            value: string,
                            saveDialog: Dialog) => {
@@ -249,13 +404,16 @@ const saveCriterionData = (config: ISearchOption,
         const criteriaElement = element.querySelector("#criteria").firstElementChild;
         criteriaElement.classList.remove("fn__none");
         criteriaElement.querySelector(".b3-chip--current")?.classList.remove("b3-chip--current");
-        criteriaElement.insertAdjacentHTML("beforeend", `<div data-type="set-criteria" class="b3-chip b3-chip--current b3-chip--middle b3-chip--pointer b3-chip--${["secondary", "primary", "info", "success", "warning", "error", ""][(criteriaElement.childElementCount) % 7]}">${criterion.name}<svg class="b3-chip__close" data-type="remove-criteria"><use xlink:href="#iconCloseRound"></use></svg></div>`);
+        criteriaElement.insertAdjacentHTML("beforeend", `<div data-type="set-criteria" class="b3-chip b3-chip--current b3-chip--middle b3-chip--pointer">${criterion.name}<svg class="b3-chip__close" data-type="remove-criteria"><use xlink:href="#iconClose"></use></svg></div>`);
     });
 };
 
-export const saveCriterion = (config: ISearchOption,
-                              criteriaData: ISearchOption[],
+export const saveCriterion = (config: Config.IUILayoutTabSearchConfig,
+                              criteriaData: Config.IUILayoutTabSearchConfig[],
                               element: Element) => {
+    if (isSensitiveSearchConfig(config)) {
+        return;
+    }
     const saveDialog = new Dialog({
         title: window.siyuan.languages.saveCriterion,
         content: `<div class="b3-dialog__content">
@@ -276,7 +434,8 @@ export const saveCriterion = (config: ISearchOption,
         saveDialog.destroy();
     });
     btnsElement[1].addEventListener("click", () => {
-        const value = saveDialog.element.querySelector("input").value.trim();
+        const inputElement = saveDialog.element.querySelector("input");
+        const value = inputElement.value.trim();
         if (!value) {
             showMessage(window.siyuan.languages["_kernel"]["142"]);
             return;
@@ -299,6 +458,7 @@ export const saveCriterion = (config: ISearchOption,
                 hasSameConfig = item.name;
             }
         });
+        inputElement.blur();
         if (hasSameName && !hasSameConfig) {
             confirmDialog(window.siyuan.languages.confirm, window.siyuan.languages.searchOverwrite, () => {
                 Array.from(criteriaElement.children).forEach(item => {
@@ -357,20 +517,28 @@ export const saveCriterion = (config: ISearchOption,
     });
 };
 
-export const moreMenu = async (config: ISearchOption,
-                               criteriaData: ISearchOption[],
+export const moreMenu = async (config: Config.IUILayoutTabSearchConfig,
+                               criteriaData: Config.IUILayoutTabSearchConfig[],
                                element: Element,
                                cb: () => void,
                                removeCriterion: () => void,
                                layoutMenu?: () => void) => {
     if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
-        window.siyuan.menus.menu.element.getAttribute("data-name") === "searchMore") {
+        window.siyuan.menus.menu.element.getAttribute("data-name") === Constants.MENU_SEARCH_MORE) {
         window.siyuan.menus.menu.remove();
         return;
     }
     window.siyuan.menus.menu.remove();
-    window.siyuan.menus.menu.element.setAttribute("data-name", "searchMore");
+    window.siyuan.menus.menu.element.setAttribute("data-name", Constants.MENU_SEARCH_MORE);
     /// #if MOBILE
+    window.siyuan.menus.menu.append(new MenuItem({
+        iconHTML: "",
+        label: window.siyuan.languages.listInvalidRefBlocks,
+        click() {
+            goUnRef();
+        }
+    }).element);
+    window.siyuan.menus.menu.append(new MenuItem({type: "separator"}).element);
     window.siyuan.menus.menu.append(new MenuItem({
         iconHTML: "",
         label: window.siyuan.languages.searchType,
@@ -387,47 +555,60 @@ export const moreMenu = async (config: ISearchOption,
             replaceFilterMenu(config);
         }
     }).element);
+    const searchMethodSubmenu = [{
+        icon: "iconExact",
+        label: window.siyuan.languages.keyword,
+        current: config.method === 0,
+        click() {
+            config.method = 0;
+            config.page = 1;
+            updateSearchResult(config, element, true);
+        }
+    }, {
+        icon: "iconQuote",
+        label: window.siyuan.languages.querySyntax,
+        current: config.method === 1,
+        click() {
+            config.method = 1;
+            config.page = 1;
+            updateSearchResult(config, element, true);
+        }
+    }, {
+        icon: "iconDatabase",
+        label: "SQL",
+        current: config.method === 2,
+        click() {
+            config.method = 2;
+            config.page = 1;
+            updateSearchResult(config, element, true);
+        }
+    }, {
+        icon: "iconRegex",
+        label: window.siyuan.languages.regex,
+        current: config.method === 3,
+        click() {
+            config.method = 3;
+            config.page = 1;
+            updateSearchResult(config, element, true);
+        }
+    }];
+    if (window.siyuan.config.ai.embedding.enabled) {
+        searchMethodSubmenu.push({
+            icon: "iconSparkles",
+            label: window.siyuan.languages.semanticSearch,
+            current: config.method === 4,
+            click() {
+                config.method = 4;
+                config.page = 1;
+                updateSearchResult(config, element, true);
+            }
+        });
+    }
     window.siyuan.menus.menu.append(new MenuItem({
         iconHTML: "",
         label: window.siyuan.languages.searchMethod,
         type: "submenu",
-        submenu: [{
-            iconHTML: "",
-            label: window.siyuan.languages.keyword,
-            current: config.method === 0,
-            click() {
-                config.method = 0;
-                config.page = 1;
-                updateSearchResult(config, element, true);
-            }
-        }, {
-            iconHTML: "",
-            label: window.siyuan.languages.querySyntax,
-            current: config.method === 1,
-            click() {
-                config.method = 1;
-                config.page = 1;
-                updateSearchResult(config, element, true);
-            }
-        }, {
-            iconHTML: "",
-            label: "SQL",
-            current: config.method === 2,
-            click() {
-                config.method = 2;
-                config.page = 1;
-                updateSearchResult(config, element, true);
-            }
-        }, {
-            iconHTML: "",
-            label: window.siyuan.languages.regex,
-            current: config.method === 3,
-            click() {
-                config.method = 3;
-                config.page = 1;
-                updateSearchResult(config, element, true);
-            }
-        }]
+        submenu: searchMethodSubmenu
     }).element);
     /// #endif
     const sortMenu = [{
@@ -561,7 +742,7 @@ export const moreMenu = async (config: ISearchOption,
     }).element);
 };
 
-const configIsSame = (config: ISearchOption, config2: ISearchOption) => {
+const configIsSame = (config: Config.IUILayoutTabSearchConfig, config2: Config.IUILayoutTabSearchConfig) => {
     if (config2.group === config.group && config2.hPath === config.hPath && config2.hasReplace === config.hasReplace &&
         config2.k === config.k && config2.method === config.method && config2.r === config.r &&
         config2.sort === config.sort && objEquals(config2.types, config.types) &&
@@ -571,43 +752,47 @@ const configIsSame = (config: ISearchOption, config2: ISearchOption) => {
     return false;
 };
 
-export const initCriteriaMenu = (element: HTMLElement, data: ISearchOption[], config: ISearchOption) => {
+export const initCriteriaMenu = (element: HTMLElement, data: Config.IUILayoutTabSearchConfig[], config: Config.IUILayoutTabSearchConfig) => {
     fetchPost("/api/storage/getCriteria", {}, (response) => {
         let html = "";
-        response.data.forEach((item: ISearchOption, index: number) => {
+        response.data.forEach((item: Config.IUILayoutTabSearchConfig) => {
             data.push(item);
             let isSame = false;
             if (configIsSame(item, config)) {
                 isSame = true;
             }
-            html += `<div data-type="set-criteria" class="${isSame ? "b3-chip--current " : ""}b3-chip b3-chip--middle b3-chip--pointer b3-chip--${["secondary", "primary", "info", "success", "warning", "error", ""][index % 7]}">${escapeHtml(item.name)}<svg class="b3-chip__close" data-type="remove-criteria"><use xlink:href="#iconCloseRound"></use></svg></div>`;
+            html += `<div data-type="set-criteria" class="${isSame ? "b3-chip--current " : ""}b3-chip b3-chip--middle b3-chip--pointer">${escapeHtml(item.name)}<svg class="b3-chip__close" data-type="remove-criteria"><use xlink:href="#iconClose"></use></svg></div>`;
         });
         /// #if MOBILE
-        element.innerHTML = `<div class="b3-chips">
+        element.innerHTML = `<div class="b3-chips${html ? "" : " fn__none"}">
     ${html}
 </div>`;
-        if (html === "") {
-            element.classList.add("fn__none");
-        } else {
-            element.classList.remove("fn__none");
-        }
         /// #else
-        element.innerHTML = `<div class="b3-chips">
+        element.innerHTML = `<div class="b3-chips${html ? "" : " fn__none"}">
     ${html}
 </div>
 <span class="fn__flex-1"></span>
 <button data-type="saveCriterion" class="b3-button b3-button--small b3-button--outline fn__flex-center">${window.siyuan.languages.saveCriterion}</button>
 <span class="fn__space"></span>
-<button data-type="removeCriterion" aria-label="${window.siyuan.languages.useCriterion}" class="ariaLabel b3-button b3-button--small b3-button--outline fn__flex-center fn__flex-shrink" data-position="9bottom">${window.siyuan.languages.removeCriterion}</button>
+<button data-type="removeCriterion" aria-label="${window.siyuan.languages.useCriterion}" class="ariaLabel b3-button b3-button--small b3-button--outline fn__flex-center fn__flex-shrink" data-position="9south">${window.siyuan.languages.removeCriterion}</button>
 <span class="fn__space"></span>`;
         /// #endif
     });
 };
 
-export const getKeyByLiElement = (element: HTMLElement) => {
+export const getKeysByLiElement = (element: HTMLElement) => {
     const keys: string[] = [];
-    element.querySelectorAll("mark").forEach(item => {
+    element.querySelectorAll(".b3-list-item__text mark").forEach(item => {
         keys.push(item.textContent);
     });
-    return [...new Set(keys)].join(" ");
+    if (keys.length === 0) {
+        element.querySelectorAll(".b3-list-item__meta mark").forEach(item => {
+            keys.push(item.textContent);
+        });
+    }
+    return [...new Set(keys)];
+};
+
+export const getKeyByLiElement = (element: HTMLElement) => {
+    return getKeysByLiElement(element).join(" ");
 };

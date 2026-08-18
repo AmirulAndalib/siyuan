@@ -1,13 +1,14 @@
 import {Constants} from "../../constants";
 import {closeModel, closePanel} from "./closePanel";
-import {openMobileFileById} from "../editor";
+import {getCurrentEditor, openMobileFileById} from "../editor";
+import {openMobileOnboarding} from "../../onboarding";
 import {validateName} from "../../editor/rename";
 import {getEventName} from "../../protyle/util/compatibility";
 import {fetchPost} from "../../util/fetch";
 import {setInlineStyle} from "../../util/assets";
 import {renderSnippet} from "../../config/util/snippets";
 import {setEmpty} from "./setEmpty";
-import {getIdZoomInByPath, getOpenNotebookCount} from "../../util/pathName";
+import {getOpenNotebookCount, parseUriInfo} from "../../util/pathName";
 import {popMenu} from "../menu";
 import {MobileFiles} from "../dock/MobileFiles";
 import {MobileOutline} from "../dock/MobileOutline";
@@ -15,19 +16,21 @@ import {hasTopClosestByTag} from "../../protyle/util/hasClosest";
 import {MobileBacklinks} from "../dock/MobileBacklinks";
 import {MobileBookmarks} from "../dock/MobileBookmarks";
 import {MobileTags} from "../dock/MobileTags";
-import {activeBlur, hideKeyboardToolbar, initKeyboardToolbar} from "./keyboardToolbar";
+import {activeBlur, initKeyboardToolbar} from "./keyboardToolbar";
 import {syncGuide} from "../../sync/syncGuide";
 import {Inbox} from "../../layout/dock/Inbox";
-import {App} from "../../index";
-import {setTitle} from "../../dialog/processSystem";
+import type {App} from "../../index";
 import {checkFold} from "../../util/noRelyPCFunction";
 import {MobileCustom} from "../dock/MobileCustom";
 import {Menu} from "../../plugin/Menu";
 import {showMessage} from "../../dialog/message";
+import {setTitle} from "../../util/processTitle";
+import {activateQueuedAVLocate, queueAVLocateRequest} from "../../protyle/render/av/locate";
+import {MobileTabs} from "../tabs/MobileTabs";
 
 let custom: MobileCustom;
 const openDockMenu = (app: App) => {
-    const menu = new Menu("dockMobileMenu");
+    const menu = new Menu(Constants.MENU_DOCK_MOBILE);
     if (menu.isOpen) {
         return;
     }
@@ -46,33 +49,33 @@ const openDockMenu = (app: App) => {
                             }
                         }
                         custom = plugin.docks[dockId].mobileModel(document.querySelector('#sidebar [data-type="sidebar-plugin"]'));
+                        window.siyuan.mobile.docks[dockId] = custom;
                     }
                 }
             });
         });
     });
-    menu.fullscreen("bottom");
+    menu.fullscreen();
     if (menu.element.lastElementChild.innerHTML === "") {
         showMessage(window.siyuan.languages._kernel[122]);
     }
 };
 
-export const initFramework = (app: App, isStart: boolean) => {
+export const initFramework = async (app: App, isStart: boolean) => {
     setInlineStyle();
-    renderSnippet();
+    const snippetReady = renderSnippet(Constants.TIMEOUT_SNIPPET_LOAD);
     initKeyboardToolbar();
     const sidebarElement = document.getElementById("sidebar");
-    let outline: MobileOutline;
-    let backlink: MobileBacklinks;
-    let bookmark: MobileBookmarks;
-    let inbox: Inbox;
-    let tag: MobileTags;
     // 不能使用 getEventName，否则点击返回会展开右侧栏
     const firstToolbarElement = sidebarElement.querySelector(".toolbar--border");
-    firstToolbarElement.addEventListener("click", (event: Event & {
-        target: Element
-    }) => {
-        const svgElement = hasTopClosestByTag(event.target, "svg");
+    firstToolbarElement.addEventListener("click", (event: MouseEvent) => {
+        const target = event.target as HTMLElement;
+        let svgElement: HTMLElement;
+        if (typeof event.detail === "string") {
+            svgElement = firstToolbarElement.querySelector(`svg[data-type="sidebar-${event.detail}-tab"]`) as HTMLElement;
+        } else {
+            svgElement = hasTopClosestByTag(target, "svg") as HTMLElement;
+        }
         if (!svgElement) {
             return;
         }
@@ -95,31 +98,35 @@ export const initFramework = (app: App, isStart: boolean) => {
             const tabPanelElement = sidebarElement.lastElementChild.querySelector(`[data-type="${itemType.replace("-tab", "")}"]`);
             if (itemType === type) {
                 if (type === "sidebar-outline-tab") {
-                    if (!outline) {
-                        outline = new MobileOutline(app);
+                    if (!window.siyuan.mobile.docks.outline) {
+                        window.siyuan.mobile.docks.outline = new MobileOutline({
+                            app,
+                            blockId: window.siyuan.mobile.editor?.protyle.block.rootID,
+                            isPreview: window.siyuan.mobile.editor ? !window.siyuan.mobile.editor.protyle.preview.element.classList.contains("fn__none") : false
+                        });
                     } else {
-                        outline.update();
+                        window.siyuan.mobile.docks.outline.reload();
                     }
                 } else if (type === "sidebar-backlink-tab") {
-                    if (!backlink) {
-                        backlink = new MobileBacklinks(app);
+                    if (!window.siyuan.mobile.docks.backlink) {
+                        window.siyuan.mobile.docks.backlink = new MobileBacklinks(app);
                     } else {
-                        backlink.update();
+                        window.siyuan.mobile.docks.backlink.update();
                     }
                 } else if (type === "sidebar-bookmark-tab") {
-                    if (!bookmark) {
-                        bookmark = new MobileBookmarks(app);
+                    if (!window.siyuan.mobile.docks.bookmark) {
+                        window.siyuan.mobile.docks.bookmark = new MobileBookmarks(app);
                     } else {
-                        bookmark.update();
+                        window.siyuan.mobile.docks.bookmark.update();
                     }
                 } else if (type === "sidebar-tag-tab") {
-                    if (!tag) {
-                        tag = new MobileTags(app);
+                    if (!window.siyuan.mobile.docks.tag) {
+                        window.siyuan.mobile.docks.tag = new MobileTags(app);
                     } else {
-                        tag.update();
+                        window.siyuan.mobile.docks.tag.update();
                     }
-                } else if (type === "sidebar-inbox-tab" && !inbox) {
-                    inbox = new Inbox(app, document.querySelector('#sidebar [data-type="sidebar-inbox"]'));
+                } else if (type === "sidebar-inbox-tab" && !window.siyuan.mobile.docks.inbox) {
+                    window.siyuan.mobile.docks.inbox = new Inbox(app, document.querySelector('#sidebar [data-type="sidebar-inbox"]'));
                 } else if (type === "sidebar-plugin-tab") {
                     if (!custom) {
                         tabPanelElement.innerHTML = `<div class="b3-list--empty">${window.siyuan.languages.emptyContent}</div>`;
@@ -136,20 +143,23 @@ export const initFramework = (app: App, isStart: boolean) => {
             }
         });
     });
-    window.siyuan.mobile.files = new MobileFiles(app);
+    await snippetReady;
+    window.siyuan.mobile.docks.file = new MobileFiles(app);
     document.getElementById("toolbarFile").addEventListener("click", () => {
-        hideKeyboardToolbar();
+        if (getCurrentEditor()?.protyle.toolbar.isMultiSelectMode()) {
+            return;
+        }
         activeBlur();
         sidebarElement.style.transform = "translateX(0px)";
         const type = sidebarElement.querySelector(".toolbar--border .toolbar__icon--active").getAttribute("data-type");
         if (type === "sidebar-outline-tab") {
-            outline.update();
+            window.siyuan.mobile.docks.outline.reload();
         } else if (type === "sidebar-backlink-tab") {
-            backlink.update();
+            window.siyuan.mobile.docks.backlink.update();
         } else if (type === "sidebar-bookmark-tab") {
-            bookmark.update();
+            window.siyuan.mobile.docks.bookmark.update();
         } else if (type === "sidebar-tag-tab") {
-            tag.update();
+            window.siyuan.mobile.docks.tag.update();
         }
     });
     // 用 touchstart 会导致键盘不收起
@@ -162,30 +172,59 @@ export const initFramework = (app: App, isStart: boolean) => {
     document.getElementById("modelClose").addEventListener("click", () => {
         closeModel();
     });
+    window.siyuan.mobile.tabs = new MobileTabs(app);
+    const toolbarTabsElement = document.getElementById("toolbarTabs");
+    toolbarTabsElement.setAttribute("aria-label", window.siyuan.languages.mobileTabs);
+    toolbarTabsElement.addEventListener("click", () => {
+        activeBlur();
+        window.siyuan.mobile.tabs.openOverview();
+    });
     initEditorName();
+    if (isStart && window.siyuan.config.fileTree.tabStartupMode === 2) {
+        window.siyuan.mobile.tabs.closeAll();
+    } else {
+        await window.siyuan.mobile.tabs.removeMissingTabs();
+    }
     if (getOpenNotebookCount() > 0) {
         if (window.JSAndroid && window.openFileByURL(window.JSAndroid.getBlockURL())) {
             return;
         }
-        const idZoomIn = getIdZoomInByPath();
-        if (idZoomIn.id) {
-            openMobileFileById(app, idZoomIn.id,
-                idZoomIn.isZoomIn ? [Constants.CB_GET_ALL, Constants.CB_GET_HL] : [Constants.CB_GET_HL, Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]);
+        const info = parseUriInfo();
+        if (info.id) {
+            if (info.avItemID) {
+                queueAVLocateRequest(info.id, {
+                    itemID: info.avItemID,
+                    viewID: info.avViewID,
+                    groupID: info.avGroupID,
+                });
+            }
+            openMobileFileById(app, info.id, info.avItemID ? [Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL] :
+                (info.focus ? [Constants.CB_GET_ALL] : [Constants.CB_GET_HL, Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]),
+            undefined, undefined, info.avItemID ? (protyle) => activateQueuedAVLocate(protyle, info.id) : undefined);
             return;
         }
-        if (window.siyuan.config.fileTree.closeTabsOnStart && isStart) {
-            setEmpty(app);
+        if (openMobileOnboarding(app)) {
+            return;
+        }
+        if (isStart && window.siyuan.config.fileTree.tabStartupMode === 1) {
+            window.siyuan.mobile.tabs.activateStartupBlank();
+            return;
+        }
+        if (isStart && window.siyuan.config.fileTree.tabStartupMode === 2) {
+            return;
+        }
+        if (await window.siyuan.mobile.tabs.restore()) {
             return;
         }
         const localDoc = window.siyuan.storage[Constants.LOCAL_DOCINFO];
-        fetchPost("/api/block/checkBlockExist", {id: localDoc.id}, existResponse => {
+        fetchPost("/api/block/checkBlockExist", {id: localDoc?.id}, existResponse => {
             if (existResponse.data) {
-                openMobileFileById(app, localDoc.id, [Constants.CB_GET_SCROLL, Constants.CB_GET_HL]);
+                openMobileFileById(app, localDoc.id, [Constants.CB_GET_SCROLL]);
             } else {
                 fetchPost("/api/block/getRecentUpdatedBlocks", {}, (response) => {
                     if (response.data.length !== 0) {
                         checkFold(response.data[0].id, (zoomIn) => {
-                            openMobileFileById(app, response.data[0].id, zoomIn ? [Constants.CB_GET_ALL, Constants.CB_GET_HL] : [Constants.CB_GET_HL, Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]);
+                            openMobileFileById(app, response.data[0].id, zoomIn ? [Constants.CB_GET_ALL] : [Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]);
                         });
                     } else {
                         setEmpty(app);
@@ -195,7 +234,11 @@ export const initFramework = (app: App, isStart: boolean) => {
         });
         return;
     }
-    setEmpty(app);
+    if (isStart && window.siyuan.config.fileTree.tabStartupMode === 1) {
+        window.siyuan.mobile.tabs.activateStartupBlank();
+    } else {
+        setEmpty(app);
+    }
 };
 
 const initEditorName = () => {

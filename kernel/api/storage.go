@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -25,20 +25,18 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func getRecentDocs(c *gin.Context) {
+func getLocalStorage(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
-	data, err := model.GetRecentDocs()
-	if nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
-		return
+	data := model.GetLocalStorage()
+	if model.IsReadOnlyRoleContext(c) {
+		data = model.FilterLocalStorageByPublishAccess(data)
 	}
 	ret.Data = data
 }
 
-func removeCriterion(c *gin.Context) {
+func getLocalStorageVal(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -47,16 +45,19 @@ func removeCriterion(c *gin.Context) {
 		return
 	}
 
-	name := arg["name"].(string)
-	err := model.RemoveCriterion(name)
-	if nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
+	var key string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("key", &key, true, true)) {
 		return
 	}
+
+	data := model.GetLocalStorage()
+	if model.IsReadOnlyRoleContext(c) {
+		data = model.FilterLocalStorageByPublishAccess(data)
+	}
+	ret.Data = data[key]
 }
 
-func setCriterion(c *gin.Context) {
+func getLocalStorageVals(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -65,63 +66,36 @@ func setCriterion(c *gin.Context) {
 		return
 	}
 
-	param, err := gulu.JSON.MarshalJSON(arg["criterion"])
-	if nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
-		return
-	}
-
-	criterion := &model.Criterion{}
-	if err = gulu.JSON.UnmarshalJSON(param, criterion); nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
-		return
-	}
-
-	err = model.SetCriterion(criterion)
-	if nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
-		return
-	}
-}
-
-func getCriteria(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	data := model.GetCriteria()
-	ret.Data = data
-}
-
-func removeLocalStorageVals(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	arg, ok := util.JsonArg(c, ret)
-	if !ok {
+	var keysArg []any
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("keys", &keysArg, true, true)) {
 		return
 	}
 
 	var keys []string
-	keysArg := arg["keys"].([]interface{})
 	for _, key := range keysArg {
-		keys = append(keys, key.(string))
+		ks, elemOk := key.(string)
+		if !elemOk {
+			ret.Code = -1
+			ret.Msg = "Field [keys]: each element should be of type [String]"
+			return
+		}
+		if ks == "" {
+			ret.Code = -1
+			ret.Msg = "Field [keys]: each element must not be empty"
+			return
+		}
+		keys = append(keys, ks)
 	}
 
-	err := model.RemoveLocalStorageVals(keys)
-	if nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
-		return
+	data := model.GetLocalStorage()
+	if model.IsReadOnlyRoleContext(c) {
+		data = model.FilterLocalStorageByPublishAccess(data)
 	}
-
-	app := arg["app"].(string)
-	evt := util.NewCmdResult("removeLocalStorageVals", 0, util.PushModeBroadcastMainExcludeSelfApp)
-	evt.AppId = app
-	evt.Data = map[string]interface{}{"keys": keys}
-	util.PushEvent(evt)
+	out := map[string]any{}
+	for _, k := range keys {
+		out[k] = data[k]
+	}
+	ret.Data = out
 }
 
 func setLocalStorageVal(c *gin.Context) {
@@ -133,23 +107,30 @@ func setLocalStorageVal(c *gin.Context) {
 		return
 	}
 
-	key := arg["key"].(string)
-	val := arg["val"].(interface{})
-	err := model.SetLocalStorageVal(key, val)
-	if nil != err {
+	var key string
+	var app string
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("key", &key, true, true),
+		util.BindJsonArg("app", &app, false, false),
+	) {
+		return
+	}
+	val := arg["val"]
+
+	setKeyVals, err := model.SetLocalStorageVals(map[string]any{key: val})
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
 
-	app := arg["app"].(string)
 	evt := util.NewCmdResult("setLocalStorageVal", 0, util.PushModeBroadcastMainExcludeSelfApp)
 	evt.AppId = app
-	evt.Data = map[string]interface{}{"key": key, "val": val}
+	evt.Data = map[string]any{"key": key, "val": setKeyVals[key]}
 	util.PushEvent(evt)
 }
 
-func setLocalStorage(c *gin.Context) {
+func setLocalStorageVals(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
@@ -158,25 +139,397 @@ func setLocalStorage(c *gin.Context) {
 		return
 	}
 
-	val := arg["val"].(interface{})
-	err := model.SetLocalStorage(val)
-	if nil != err {
+	var keyVals map[string]any
+	var app string
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("keyVals", &keyVals, true, true),
+		util.BindJsonArg("app", &app, false, false),
+	) {
+		return
+	}
+
+	setKeyVals, err := model.SetLocalStorageVals(keyVals)
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
 
-	app := arg["app"].(string)
-	evt := util.NewCmdResult("setLocalStorage", 0, util.PushModeBroadcastMainExcludeSelfApp)
-	evt.AppId = app
-	evt.Data = val
-	util.PushEvent(evt)
+	evtSet := util.NewCmdResult("setLocalStorageVals", 0, util.PushModeBroadcastMainExcludeSelfApp)
+	evtSet.AppId = app
+	evtSet.Data = map[string]any{"keyVals": setKeyVals}
+	util.PushEvent(evtSet)
 }
 
-func getLocalStorage(c *gin.Context) {
+func removeLocalStorageVal(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
-	data := model.GetLocalStorage()
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var key string
+	var app string
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("key", &key, true, true),
+		util.BindJsonArg("app", &app, false, false),
+	) {
+		return
+	}
+
+	err := model.RemoveLocalStorageVals([]string{key})
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	evt := util.NewCmdResult("removeLocalStorageVal", 0, util.PushModeBroadcastMainExcludeSelfApp)
+	evt.AppId = app
+	evt.Data = map[string]any{"key": key}
+	util.PushEvent(evt)
+}
+
+func removeLocalStorageVals(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var keysArg []any
+	var app string
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("keys", &keysArg, true, true),
+		util.BindJsonArg("app", &app, false, false),
+	) {
+		return
+	}
+
+	var keys []string
+	for _, key := range keysArg {
+		ks, elemOk := key.(string)
+		if !elemOk {
+			ret.Code = -1
+			ret.Msg = "Field [keys]: each element should be of type [String]"
+			return
+		}
+		if ks == "" {
+			ret.Code = -1
+			ret.Msg = "Field [keys]: each element must not be empty"
+			return
+		}
+		keys = append(keys, ks)
+	}
+
+	err := model.RemoveLocalStorageVals(keys)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	evt := util.NewCmdResult("removeLocalStorageVals", 0, util.PushModeBroadcastMainExcludeSelfApp)
+	evt.AppId = app
+	evt.Data = map[string]any{"keys": keys}
+	util.PushEvent(evt)
+}
+
+func getCriteria(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	data := model.GetCriteria()
+	if model.IsReadOnlyRoleContext(c) {
+		publishAccess := model.GetPublishAccess()
+		data = model.FilterCriteriaByPublishAccess(c, publishAccess, data)
+	}
 	ret.Data = data
+}
+
+func setCriterion(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var criterionRaw any
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("criterion", &criterionRaw, true, false)) {
+		return
+	}
+
+	param, err := gulu.JSON.MarshalJSON(criterionRaw)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	criterion := &model.Criterion{}
+	if err = gulu.JSON.UnmarshalJSON(param, criterion); err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	err = model.SetCriterion(criterion)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func removeCriterion(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var name string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("name", &name, true, true)) {
+		return
+	}
+
+	err := model.RemoveCriterion(name)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func getRecentDocs(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	var sortBy string
+	arg := map[string]any{}
+	// 兼容旧版接口，不能直接使用 util.JsonArg()
+	if err := c.ShouldBindJSON(&arg); err == nil {
+		if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("sortBy", &sortBy, false, false)) {
+			return
+		}
+	}
+
+	data, err := model.GetRecentDocs(sortBy)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+	if model.IsReadOnlyRoleContext(c) {
+		publishAccess := model.GetPublishAccess()
+		data = model.FilterRecentDocsByPublishAccess(c, publishAccess, data)
+	}
+	ret.Data = data
+}
+
+func updateRecentDocOpenTime(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	if model.IsReadOnlyRoleContext(c) {
+		return
+	}
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var rootID string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("rootID", &rootID, false, false)) {
+		return
+	}
+	if "" == rootID {
+		return
+	}
+
+	err := model.UpdateRecentDocOpenTime(rootID)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func updateRecentDocViewTime(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	if model.IsReadOnlyRoleContext(c) {
+		return
+	}
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var rootID string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("rootID", &rootID, false, false)) {
+		return
+	}
+	if "" == rootID {
+		return
+	}
+
+	err := model.UpdateRecentDocViewTime(rootID)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func updateRecentDocCloseTime(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	if model.IsReadOnlyRoleContext(c) {
+		return
+	}
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var rootID string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("rootID", &rootID, false, false)) {
+		return
+	}
+	if "" == rootID {
+		return
+	}
+
+	err := model.UpdateRecentDocCloseTime(rootID)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func batchUpdateRecentDocCloseTime(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	if model.IsReadOnlyRoleContext(c) {
+		return
+	}
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var rootIDsArg []any
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("rootIDs", &rootIDsArg, false, false)) {
+		return
+	}
+
+	var rootIDs []string
+	for _, id := range rootIDsArg {
+		str, elemOk := id.(string)
+		if !elemOk {
+			continue
+		}
+		if "" == str {
+			continue
+		}
+		rootIDs = append(rootIDs, str)
+	}
+	if 0 == len(rootIDs) {
+		return
+	}
+
+	err := model.BatchUpdateRecentDocCloseTime(rootIDs)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func getOutlineStorage(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var docID string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("docID", &docID, true, true)) {
+		return
+	}
+
+	data, err := model.GetOutlineStorage(docID)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+	ret.Data = data
+}
+
+func setOutlineStorage(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var docID string
+	var val map[string]any
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("docID", &docID, true, true),
+		util.BindJsonArg("val", &val, true, false),
+	) {
+		return
+	}
+
+	err := model.SetOutlineStorage(docID, val)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+}
+
+func removeOutlineStorage(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	var docID string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("docID", &docID, true, true)) {
+		return
+	}
+
+	err := model.RemoveOutlineStorage(docID)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
 }

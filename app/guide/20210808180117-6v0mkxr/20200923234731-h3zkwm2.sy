@@ -1,13 +1,13 @@
 {
 	"ID": "20200923234731-h3zkwm2",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"icon": "2753",
 		"id": "20200923234731-h3zkwm2",
 		"title": "FAQ",
 		"type": "doc",
-		"updated": "20230820183340"
+		"updated": "20260810212846"
 	},
 	"Children": [
 		{
@@ -442,7 +442,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220808181753-3ligpvz",
-				"updated": "20220808181753"
+				"updated": "20260810212846"
 			},
 			"Children": [
 				{
@@ -510,7 +510,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20220619172044-z4myy48",
-				"updated": "20220619172044"
+				"updated": "20260810212846"
 			},
 			"Children": [
 				{
@@ -522,7 +522,7 @@
 					},
 					"Properties": {
 						"id": "20220619172044-451fqpf",
-						"updated": "20220619172044"
+						"updated": "20260810212846"
 					},
 					"Children": [
 						{
@@ -530,7 +530,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220619172044-bx4v3iz",
-								"updated": "20220619172044"
+								"updated": "20260810212846"
 							},
 							"Children": [
 								{
@@ -549,7 +549,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Export"
+									"TextMarkTextContent": "App"
 								},
 								{
 									"Type": "NodeText",
@@ -562,7 +562,7 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​​ / "
+									"Data": "​ / "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -586,7 +586,7 @@
 					},
 					"Properties": {
 						"id": "20220619172044-r6xfdvm",
-						"updated": "20220619172044"
+						"updated": "20260810212846"
 					},
 					"Children": [
 						{
@@ -594,7 +594,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220619172044-ccusmko",
-								"updated": "20220619172044"
+								"updated": "20260810212846"
 							},
 							"Children": [
 								{
@@ -608,16 +608,16 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​​ - "
+									"Data": "​ - "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "About"
+									"TextMarkTextContent": "App"
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​​ - "
+									"Data": "​ - "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -626,7 +626,7 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​​ / "
+									"Data": " / "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -635,11 +635,25 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​​"
+									"Data": "​"
 								}
 							]
 						}
 					]
+				}
+			]
+		},
+		{
+			"ID": "20250518103412-4mf2mer",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20250518103412-4mf2mer",
+				"updated": "20250518103440"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": "On macOS, SiYuan will access the Desktop, Documents, and iCloud drive folders to detect whether the workspace is placed under the iCloud synchronization path. Please rest assured that SiYuan will never snoop on your personal data."
 				}
 			]
 		},
@@ -678,7 +692,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220909100946-x94gyft",
-				"updated": "20220909100946"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -693,7 +707,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20220909100946-nieof3y",
-				"updated": "20220909101032"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -733,7 +747,7 @@
 					},
 					"Properties": {
 						"id": "20220909100946-ej9yi4j",
-						"updated": "20220909101032"
+						"updated": "20260803171606"
 					},
 					"Children": [
 						{
@@ -741,7 +755,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220909100946-n3d5619",
-								"updated": "20220909101032"
+								"updated": "20260803171606"
 							},
 							"Children": [
 								{
@@ -814,7 +828,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220909100946-9eyc3uh",
-				"updated": "20230820182932"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -870,102 +884,12 @@
 			]
 		},
 		{
-			"ID": "20201224120448-ygu8bzx",
-			"Type": "NodeHeading",
-			"HeadingLevel": 2,
-			"Properties": {
-				"id": "20201224120448-ygu8bzx",
-				"updated": "20211009092454"
-			},
-			"Children": [
-				{
-					"Type": "NodeText",
-					"Data": "Is there any "
-				},
-				{
-					"Type": "NodeTextMark",
-					"TextMarkType": "tag",
-					"TextMarkTextContent": "Note"
-				},
-				{
-					"Type": "NodeText",
-					"Data": " for deleting docs?"
-				}
-			]
-		},
-		{
-			"ID": "20210615213114-fq2uew0",
-			"Type": "NodeParagraph",
-			"Properties": {
-				"id": "20210615213114-fq2uew0",
-				"updated": "20220502163309"
-			},
-			"Children": [
-				{
-					"Type": "NodeText",
-					"Data": "After deletion, the doc will not appear in the operating system's recycle bin, but will be deleted directly. When deleted, SiYuan will generate "
-				},
-				{
-					"Type": "NodeTextMark",
-					"TextMarkType": "block-ref",
-					"TextMarkBlockRefID": "20210615213222-vs5tzbd",
-					"TextMarkBlockRefSubtype": "s",
-					"TextMarkTextContent": "data history"
-				},
-				{
-					"Type": "NodeText",
-					"Data": "."
-				}
-			]
-		},
-		{
-			"ID": "20210106192438-on2fb5k",
-			"Type": "NodeHeading",
-			"HeadingLevel": 2,
-			"Properties": {
-				"id": "20210106192438-on2fb5k"
-			},
-			"Children": [
-				{
-					"Type": "NodeHeadingC8hMarker",
-					"Data": "## "
-				},
-				{
-					"Type": "NodeText",
-					"Data": "How can I just wrap and not start a new paragraph?"
-				}
-			]
-		},
-		{
-			"ID": "20210106192504-pgryxb1",
-			"Type": "NodeParagraph",
-			"Properties": {
-				"id": "20210106192504-pgryxb1",
-				"updated": "20210417112701"
-			},
-			"Children": [
-				{
-					"Type": "NodeText",
-					"Data": "Please use "
-				},
-				{
-					"Type": "NodeTextMark",
-					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Shift+Enter"
-				},
-				{
-					"Type": "NodeText",
-					"Data": "."
-				}
-			]
-		},
-		{
 			"ID": "20220501231348-sx3l5qp",
 			"Type": "NodeHeading",
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220501231348-sx3l5qp",
-				"updated": "20220501231357"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -979,208 +903,161 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220501231348-bfslmf5",
-				"updated": "20220501231419"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "The first sub-block under the list item is the block icon omitted. You can move the cursor into this block and trigger its block menu with "
+					"Data": "Move the caret into the target block and press "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Ctrl+/"
+					"TextMarkTextContent": "Shift"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " ."
+					"Data": "+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "↑"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " repeatedly to select the block. Then use "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "Ctrl"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "/"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " to open the block menu; on macOS, use "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "⌘"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "/"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "."
 				}
 			]
 		},
 		{
-			"ID": "20220615153446-i8gpnt2",
+			"ID": "20260807094000-a1s2e3n",
 			"Type": "NodeHeading",
 			"HeadingLevel": 2,
 			"Properties": {
-				"id": "20220615153446-i8gpnt2",
-				"updated": "20220615153446"
+				"id": "20260807094000-a1s2e3n",
+				"updated": "20260807094000"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "How to share notes?"
+					"Data": "Why are assets retained after I delete images or files from a document?"
 				}
 			]
 		},
 		{
-			"ID": "20220615153446-zufy5mm",
-			"Type": "NodeList",
-			"ListData": {},
+			"ID": "20260807094000-faqen01",
+			"Type": "NodeParagraph",
 			"Properties": {
-				"id": "20220615153446-zufy5mm",
-				"updated": "20230104152515"
+				"id": "20260807094000-faqen01",
+				"updated": "20260807094000"
 			},
 			"Children": [
 				{
-					"ID": "20230104152308-nwfyw9q",
-					"Type": "NodeListItem",
-					"ListData": {
-						"BulletChar": 42,
-						"Marker": "Kg=="
-					},
-					"Properties": {
-						"id": "20230104152308-nwfyw9q",
-						"updated": "20230104152515"
-					},
-					"Children": [
-						{
-							"ID": "20230104152308-v9kzfgg",
-							"Type": "NodeParagraph",
-							"Properties": {
-								"id": "20230104152308-v9kzfgg",
-								"updated": "20230104152515"
-							},
-							"Children": [
-								{
-									"Type": "NodeTextMark",
-									"TextMarkType": "block-ref",
-									"TextMarkBlockRefID": "20230104152135-1iei0xa",
-									"TextMarkBlockRefSubtype": "s",
-									"TextMarkTextContent": "Share document to Liandi"
-								}
-							]
-						}
-					]
+					"Type": "NodeText",
+					"Data": "Images and files inserted into a document are references to assets. Deleting content from a document removes only the reference at that location, not the corresponding asset, because the same asset may also be referenced by other documents, databases, document title images, or HTML."
+				}
+			]
+		},
+		{
+			"ID": "20260807094000-faqen02",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20260807094000-faqen02",
+				"updated": "20260807094000"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": "Determining whether an asset is completely unused requires scanning the entire workspace. Performing this check every time a reference is deleted would affect editing performance. Automatically deleting assets would also make undo and multi-device synchronization unreliable and could cause accidental data loss. Therefore, SiYuan does not automatically delete assets when content references are removed and does not provide an option to enable this behavior."
+				}
+			]
+		},
+		{
+			"ID": "20260807094000-faqen03",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20260807094000-faqen03",
+				"updated": "20260807094000"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": "After confirming that these files are no longer needed, review and clean them in "
 				},
 				{
-					"ID": "20220615153446-j8izdpx",
-					"Type": "NodeListItem",
-					"ListData": {
-						"BulletChar": 42,
-						"Marker": "Kg=="
-					},
-					"Properties": {
-						"id": "20220615153446-j8izdpx",
-						"updated": "20220615153525"
-					},
-					"Children": [
-						{
-							"ID": "20220615153446-mm04qjn",
-							"Type": "NodeParagraph",
-							"Properties": {
-								"id": "20220615153446-mm04qjn",
-								"updated": "20220615153525"
-							},
-							"Children": [
-								{
-									"Type": "NodeText",
-									"Data": "Export and import "
-								},
-								{
-									"Type": "NodeTextMark",
-									"TextMarkType": "code",
-									"TextMarkTextContent": ".sy.zip"
-								},
-								{
-									"Type": "NodeText",
-									"Data": "​ package"
-								}
-							]
-						}
-					]
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "Settings"
 				},
 				{
-					"ID": "20220615153446-xatayy7",
-					"Type": "NodeListItem",
-					"ListData": {
-						"BulletChar": 42,
-						"Marker": "Kg=="
-					},
-					"Properties": {
-						"id": "20220615153446-xatayy7",
-						"updated": "20220615153512"
-					},
-					"Children": [
-						{
-							"ID": "20220615153446-2f54afd",
-							"Type": "NodeParagraph",
-							"Properties": {
-								"id": "20220615153446-2f54afd",
-								"updated": "20220615153512"
-							},
-							"Children": [
-								{
-									"Type": "NodeText",
-									"Data": "Via network hosting"
-								}
-							]
-						}
-					]
+					"Type": "NodeText",
+					"Data": " - "
 				},
 				{
-					"ID": "20220615153446-dlcpq8t",
-					"Type": "NodeListItem",
-					"ListData": {
-						"BulletChar": 42,
-						"Marker": "Kg=="
-					},
-					"Properties": {
-						"id": "20220615153446-dlcpq8t",
-						"updated": "20220615153515"
-					},
-					"Children": [
-						{
-							"ID": "20220615153446-vp4d7u6",
-							"Type": "NodeParagraph",
-							"Properties": {
-								"id": "20220615153446-vp4d7u6",
-								"updated": "20220615153515"
-							},
-							"Children": [
-								{
-									"Type": "NodeText",
-									"Data": "Export and import Markdown"
-								}
-							]
-						}
-					]
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "Assets"
 				},
 				{
-					"ID": "20220615153446-gnwpvme",
-					"Type": "NodeListItem",
-					"ListData": {
-						"BulletChar": 42,
-						"Marker": "Kg=="
-					},
-					"Properties": {
-						"id": "20220615153446-gnwpvme",
-						"updated": "20220615153446"
-					},
-					"Children": [
-						{
-							"ID": "20220615153446-p54g6hl",
-							"Type": "NodeParagraph",
-							"Properties": {
-								"id": "20220615153446-p54g6hl",
-								"updated": "20220615153446"
-							},
-							"Children": [
-								{
-									"Type": "NodeText",
-									"Data": "​"
-								},
-								{
-									"Type": "NodeTextMark",
-									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Export Preview"
-								},
-								{
-									"Type": "NodeText",
-									"Data": "​​ to copy to third-party online services"
-								}
-							]
-						}
-					]
+					"Type": "NodeText",
+					"Data": " - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "Unreferenced assets"
+				},
+				{
+					"Type": "NodeText",
+					"Data": ". Cleanup operations are recorded in "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "block-ref",
+					"TextMarkBlockRefID": "20210615213222-vs5tzbd",
+					"TextMarkBlockRefSubtype": "d",
+					"TextMarkTextContent": "Data history"
+				},
+				{
+					"Type": "NodeText",
+					"Data": ". If an asset is deleted by mistake, select Assets in Data History and roll it back."
 				}
 			]
 		},
@@ -1190,7 +1067,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220708111435-xmj42q4",
-				"updated": "20220708111439"
+				"updated": "20250115163037"
 			},
 			"Children": [
 				{
@@ -1205,7 +1082,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20220708111435-a2z4tpd",
-				"updated": "20220708111614"
+				"updated": "20250115163037"
 			},
 			"Children": [
 				{
@@ -1244,7 +1121,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "About"
+									"TextMarkTextContent": "Account & Sync"
 								},
 								{
 									"Type": "NodeText",
@@ -1281,7 +1158,7 @@
 					},
 					"Properties": {
 						"id": "20220708111435-ptoqng0",
-						"updated": "20220708111603"
+						"updated": "20250115163037"
 					},
 					"Children": [
 						{
@@ -1306,7 +1183,7 @@
 							},
 							"Properties": {
 								"id": "20220708111435-w2hbl28",
-								"updated": "20220708111603"
+								"updated": "20250115163037"
 							},
 							"Children": [
 								{
@@ -1320,7 +1197,7 @@
 									},
 									"Properties": {
 										"id": "20220708111435-nev43mp",
-										"updated": "20220708111435"
+										"updated": "20250115163037"
 									},
 									"Children": [
 										{
@@ -1328,7 +1205,7 @@
 											"Type": "NodeParagraph",
 											"Properties": {
 												"id": "20220708111435-zrahxh3",
-												"updated": "20220708111435"
+												"updated": "20250115163037"
 											},
 											"Children": [
 												{
@@ -1342,16 +1219,16 @@
 												},
 												{
 													"Type": "NodeText",
-													"Data": " or directly copy the "
+													"Data": "​ or directly copy the "
 												},
 												{
 													"Type": "NodeTextMark",
-													"TextMarkType": "kbd",
+													"TextMarkType": "code",
 													"TextMarkTextContent": "workspace/data/"
 												},
 												{
 													"Type": "NodeText",
-													"Data": " folder on the file system"
+													"Data": "​ folder on the file system"
 												}
 											]
 										}
@@ -1391,7 +1268,7 @@
 												{
 													"Type": "NodeTextMark",
 													"TextMarkType": "kbd",
-													"TextMarkTextContent": "About"
+													"TextMarkTextContent": "Account & Sync"
 												},
 												{
 													"Type": "NodeText",
@@ -1552,7 +1429,7 @@
 					"TextMarkType": "block-ref",
 					"TextMarkBlockRefID": "20230805231614-vqn28eh",
 					"TextMarkBlockRefSubtype": "s",
-					"TextMarkTextContent": "Member\u0026apos;s privileges"
+					"TextMarkTextContent": "Member&apos;s privileges"
 				},
 				{
 					"Type": "NodeText",

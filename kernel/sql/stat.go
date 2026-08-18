@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -33,7 +33,7 @@ func getDatabaseVer() (ret string) {
 	key := "siyuan_database_ver"
 	stmt := "SELECT value FROM stat WHERE `key` = ?"
 	row := db.QueryRow(stmt, key)
-	if err := row.Scan(&ret); nil != err {
+	if err := row.Scan(&ret); err != nil {
 		if !strings.Contains(err.Error(), "no such table") {
 			logging.LogErrorf("query database version failed: %s", err)
 		}
@@ -44,29 +44,22 @@ func getDatabaseVer() (ret string) {
 func setDatabaseVer() {
 	key := "siyuan_database_ver"
 	tx, err := beginTx()
-	if nil != err {
+	if err != nil {
 		return
 	}
-	if err = putStat(tx, key, util.DatabaseVer); nil != err {
+	if err = putStat(tx, key, util.DatabaseVer); err != nil {
 		return
 	}
 	commitTx(tx)
 }
 
 func putStat(tx *sql.Tx, key, value string) (err error) {
-	stmt := "DELETE FROM stat WHERE `key` = '" + key + "'"
-	if err = execStmtTx(tx, stmt); nil != err {
+	stmt := "DELETE FROM stat WHERE `key` = ?"
+	if err = execStmtTx(tx, stmt, key); err != nil {
 		return
 	}
 
-	stmt = "INSERT INTO stat VALUES ('" + key + "', '" + value + "')"
-	err = execStmtTx(tx, stmt)
-	return
-}
-
-func getStat(key string) (ret string) {
-	stmt := "SELECT value FROM stat WHERE `key` = '" + key + "'"
-	row := queryRow(stmt)
-	row.Scan(&ret)
+	stmt = "INSERT INTO stat VALUES (?, ?)"
+	err = execStmtTx(tx, stmt, key, value)
 	return
 }

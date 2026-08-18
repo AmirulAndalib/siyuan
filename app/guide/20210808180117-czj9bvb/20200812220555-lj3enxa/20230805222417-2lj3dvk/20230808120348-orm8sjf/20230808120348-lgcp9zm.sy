@@ -1,11 +1,12 @@
 {
 	"ID": "20230808120348-lgcp9zm",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20230808120348-lgcp9zm",
 		"title": "数据备份",
-		"updated": "20220708103950"
+		"type": "doc",
+		"updated": "20260614144934"
 	},
 	"Children": [
 		{
@@ -14,7 +15,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230808120348-jzidvij",
-				"updated": "20220708095359"
+				"updated": "20260614144934"
 			},
 			"Children": [
 				{
@@ -28,7 +29,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230808120348-t1mk2y9",
-				"updated": "20220708103950"
+				"updated": "20260614144934"
 			},
 			"Children": [
 				{
@@ -44,7 +45,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": "上传到云端。"
+					"Data": "上传到云端，用于灾难恢复。与数据同步不同：同步的目的是保持多设备数据一致，备份是手动上传快照存档以备不时之需。"
 				}
 			]
 		},

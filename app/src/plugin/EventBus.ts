@@ -8,9 +8,6 @@ export class EventBus<DetailType = any> {
     }
 
     on(type: TEventBus, listener: (event: CustomEvent<DetailType>) => void) {
-        if (type ==="loaded-protyle") {
-            console.warn("0.8.8 将移除 loaded-protyle, 请使用 loaded-protyle-static 进行替代");
-        }
         this.eventTarget.addEventListener(type, listener);
     }
 
@@ -32,24 +29,27 @@ export const emitOpenMenu = (options: {
     type: TEventBus,
     detail: any,
     separatorPosition?: "top" | "bottom",
+    appendToMenu?: boolean,
 }) => {
     const pluginSubMenu = new subMenu();
     options.detail.menu = pluginSubMenu;
     options.plugins.forEach((plugin) => {
         plugin.eventBus.emit(options.type, options.detail);
     });
-    if (pluginSubMenu.menus.length > 0) {
+    if (pluginSubMenu.menus.length > 0 && options.appendToMenu !== false) {
         if (options.separatorPosition === "top") {
-            window.siyuan.menus.menu.append(new MenuItem({type: "separator"}).element);
+            window.siyuan.menus.menu.append(new MenuItem({id: "separator_pluginTop", type: "separator"}).element);
         }
         window.siyuan.menus.menu.append(new MenuItem({
+            id: "plugin",
             label: window.siyuan.languages.plugin,
             icon: "iconPlugin",
             type: "submenu",
             submenu: pluginSubMenu.menus,
         }).element);
         if (options.separatorPosition === "bottom") {
-            window.siyuan.menus.menu.append(new MenuItem({type: "separator"}).element);
+            window.siyuan.menus.menu.append(new MenuItem({id: "separator_pluginBottom", type: "separator"}).element);
         }
     }
+    return pluginSubMenu.menus;
 };

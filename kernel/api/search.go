@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -17,14 +17,54 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/88250/gulu"
 	"github.com/gin-gonic/gin"
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/sql"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+func listInvalidBlockRefs(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	page := 1
+	if nil != arg["page"] {
+		page = int(arg["page"].(float64))
+	}
+	if 0 >= page {
+		page = 1
+	}
+
+	pageSize := 32
+	if nil != arg["pageSize"] {
+		pageSize = int(arg["pageSize"].(float64))
+	}
+	if 0 >= pageSize {
+		pageSize = 32
+	}
+
+	blocks, matchedBlockCount, matchedRootCount, pageCount := model.ListInvalidBlockRefs(page, pageSize)
+	if model.IsReadOnlyRoleContext(c) {
+		publishAccess := model.GetPublishAccess()
+		blocks = model.FilterBlocksByPublishAccess(c, publishAccess, blocks)
+	}
+	ret.Data = map[string]any{
+		"blocks":            blocks,
+		"matchedBlockCount": matchedBlockCount,
+		"matchedRootCount":  matchedRootCount,
+		"pageCount":         pageCount,
+	}
+}
 
 func getAssetContent(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
@@ -38,9 +78,44 @@ func getAssetContent(c *gin.Context) {
 	id := arg["id"].(string)
 	query := arg["query"].(string)
 	queryMethod := int(arg["queryMethod"].(float64))
+	assetContent := model.GetAssetContent(id, query, queryMethod)
+	if model.IsReadOnlyRoleContext(c) && assetContent != nil {
+		publishAccess := model.GetPublishAccess()
+		filteredAssetContents := model.FilterAssetContentByPublishAccess(c, publishAccess, []*model.AssetContent{assetContent})
+		if len(filteredAssetContents) > 0 {
+			assetContent = filteredAssetContents[0]
+		} else {
+			assetContent = nil
+		}
+	}
+	ret.Data = map[string]any{
+		"assetContent": assetContent,
+	}
+	return
+}
 
-	ret.Data = map[string]interface{}{
-		"assetContent": model.GetAssetContent(id, query, queryMethod),
+func getAssetContentByPath(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	path := arg["path"].(string)
+	assetContent := model.GetAssetContentByPath(path)
+	if model.IsReadOnlyRoleContext(c) && assetContent != nil {
+		publishAccess := model.GetPublishAccess()
+		filteredAssetContents := model.FilterAssetContentByPublishAccess(c, publishAccess, []*model.AssetContent{assetContent})
+		if len(filteredAssetContents) > 0 {
+			assetContent = filteredAssetContents[0]
+		} else {
+			assetContent = nil
+		}
+	}
+	ret.Data = map[string]any{
+		"assetContent": assetContent,
 	}
 	return
 }
@@ -54,14 +129,39 @@ func fullTextSearchAssetContent(c *gin.Context) {
 		return
 	}
 
-	if !model.IsPaidUser() {
-		ret.Code = 1
+	page, pageSize, query, types, method, orderBy := parseSearchAssetContentArgs(arg)
+	if method == 2 && !model.IsAdminRoleContext(c) {
+		ret.Code = -1
+		ret.Msg = "SQL search requires administrator privileges"
 		return
 	}
 
-	page, pageSize, query, types, method, orderBy := parseSearchAssetContentArgs(arg)
-	assetContents, matchedAssetCount, pageCount := model.FullTextSearchAssetContent(query, types, method, orderBy, page, pageSize)
-	ret.Data = map[string]interface{}{
+	isReadOnlyRole := model.IsReadOnlyRoleContext(c)
+	searchPage, searchPageSize := page, pageSize
+	if isReadOnlyRole {
+		searchPage = 1
+		searchPageSize = model.Conf.Search.Limit
+	}
+	assetContents, matchedAssetCount, pageCount, err := model.FullTextSearchAssetContent(query, types, method, orderBy, searchPage, searchPageSize)
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+	if isReadOnlyRole {
+		publishAccess := model.GetPublishAccess()
+		assetContents = model.FilterAssetContentByPublishAccess(c, publishAccess, assetContents)
+		matchedAssetCount = len(assetContents)
+		pageCount = (matchedAssetCount + pageSize - 1) / pageSize
+		if page > pageCount {
+			assetContents = []*model.AssetContent{}
+		} else {
+			from := (page - 1) * pageSize
+			to := min(from+pageSize, matchedAssetCount)
+			assetContents = assetContents[from:to]
+		}
+	}
+	ret.Data = map[string]any{
 		"assetContents":     assetContents,
 		"matchedAssetCount": matchedAssetCount,
 		"pageCount":         pageCount,
@@ -77,31 +177,41 @@ func findReplace(c *gin.Context) {
 		return
 	}
 
-	_, _, _, paths, boxes, types, method, orderBy, groupBy := parseSearchBlockArgs(arg)
+	_, _, _, paths, boxes, types, subTypes, method, _, _ := parseSearchBlockArgs(arg)
 
 	k := arg["k"].(string)
 	r := arg["r"].(string)
-	idsArg := arg["ids"].([]interface{})
+	idsArg := arg["ids"].([]any)
 	var ids []string
 	for _, id := range idsArg {
 		ids = append(ids, id.(string))
 	}
 
 	replaceTypes := map[string]bool{}
-	// text, imgText, imgTitle, imgSrc, aText, aTitle, aHref, code, em, strong, inlineMath, inlineMemo, kbd, mark, s, sub, sup, tag, u
+	// text, imgText, imgTitle, imgSrc, aText, aTitle, aHref, code, em, strong, inlineMath, inlineMemo, blockRef, fileAnnotationRef kbd, mark, s, sub, sup, tag, u
 	// docTitle, codeBlock, mathBlock, htmlBlock
 	if nil != arg["replaceTypes"] {
-		replaceTypesArg := arg["replaceTypes"].(map[string]interface{})
+		replaceTypesArg := arg["replaceTypes"].(map[string]any)
 		for t, b := range replaceTypesArg {
 			replaceTypes[t] = b.(bool)
 		}
 	}
 
-	err := model.FindReplace(k, r, replaceTypes, ids, paths, boxes, types, method, orderBy, groupBy)
-	if nil != err {
+	boxID := ""
+	if 1 == len(boxes) && model.IsEncryptedBox(boxes[0]) {
+		boxID = boxes[0]
+		if err := holdEncryptedBoxRequest(c, boxID); err != nil {
+			ret.Code = 1
+			ret.Msg = err.Error()
+			return
+		}
+	}
+
+	err := model.FindReplaceInBox(k, r, replaceTypes, ids, paths, boxes, types, subTypes, method, boxID)
+	if err != nil {
 		ret.Code = 1
 		ret.Msg = err.Error()
-		ret.Data = map[string]interface{}{"closeTimeout": 5000}
+		ret.Data = map[string]any{"closeTimeout": 5000}
 		return
 	}
 	return
@@ -120,7 +230,7 @@ func searchAsset(c *gin.Context) {
 
 	var exts []string
 	if extsArg := arg["exts"]; nil != extsArg {
-		for _, ext := range extsArg.([]interface{}) {
+		for _, ext := range extsArg.([]any) {
 			exts = append(exts, ext.(string))
 		}
 	}
@@ -143,7 +253,7 @@ func searchTag(c *gin.Context) {
 	if 1 > len(tags) {
 		tags = []string{}
 	}
-	ret.Data = map[string]interface{}{
+	ret.Data = map[string]any{
 		"tags": tags,
 		"k":    k,
 	}
@@ -159,10 +269,10 @@ func searchWidget(c *gin.Context) {
 	}
 
 	keyword := arg["k"].(string)
-	blocks := model.SearchWidget(keyword)
-	ret.Data = map[string]interface{}{
-		"blocks": blocks,
-		"k":      keyword,
+	widgets := model.SearchWidget(keyword)
+	ret.Data = map[string]any{
+		"widgets": widgets,
+		"k":       keyword,
 	}
 }
 
@@ -177,7 +287,7 @@ func removeTemplate(c *gin.Context) {
 
 	path := arg["path"].(string)
 	err := model.RemoveTemplate(path)
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
@@ -194,10 +304,10 @@ func searchTemplate(c *gin.Context) {
 	}
 
 	keyword := arg["k"].(string)
-	blocks := model.SearchTemplate(keyword)
-	ret.Data = map[string]interface{}{
-		"blocks": blocks,
-		"k":      keyword,
+	templates := model.SearchTemplate(keyword)
+	ret.Data = map[string]any{
+		"templates": templates,
+		"k":         keyword,
 	}
 }
 
@@ -212,12 +322,12 @@ func getEmbedBlock(c *gin.Context) {
 	}
 
 	embedBlockID := arg["embedBlockID"].(string)
-	includeIDsArg := arg["includeIDs"].([]interface{})
+	includeIDsArg := arg["includeIDs"].([]any)
 	var includeIDs []string
 	for _, includeID := range includeIDsArg {
 		includeIDs = append(includeIDs, includeID.(string))
 	}
-	headingMode := 0 // 0：带标题下方块
+	headingMode := 0 // 0：显示标题与下方的块，1：仅显示标题，2：仅显示标题下方的块
 	headingModeArg := arg["headingMode"]
 	if nil != headingModeArg {
 		headingMode = int(headingModeArg.(float64))
@@ -227,9 +337,30 @@ func getEmbedBlock(c *gin.Context) {
 	if nil != breadcrumbArg {
 		breadcrumb = breadcrumbArg.(bool)
 	}
+	notebook := ""
+	if notebookArg, ok := arg["notebook"].(string); ok && model.IsEncryptedBox(notebookArg) {
+		notebook = notebookArg
+	}
 
-	blocks := model.GetEmbedBlock(embedBlockID, includeIDs, headingMode, breadcrumb)
-	ret.Data = map[string]interface{}{
+	isReadOnlyRole := model.IsReadOnlyRoleContext(c)
+	var blocks []*model.EmbedBlock
+	if isReadOnlyRole {
+		publishAccess := model.GetPublishAccess()
+		if !model.CheckBlockIdAccessableByPublishAccess(c, publishAccess, embedBlockID) {
+			ret.Code = -1
+			ret.Msg = fmt.Sprintf(model.Conf.Language(15), embedBlockID)
+			return
+		}
+		blocks = model.GetEmbedBlockForPublish(embedBlockID, includeIDs, headingMode, breadcrumb)
+		blocks = model.FilterEmbedBlocksByPublishAccess(c, publishAccess, blocks)
+	} else {
+		if notebook == "" {
+			blocks = model.GetEmbedBlock(embedBlockID, includeIDs, headingMode, breadcrumb)
+		} else {
+			blocks = model.GetEmbedBlockInBox(embedBlockID, includeIDs, headingMode, breadcrumb, notebook)
+		}
+	}
+	ret.Data = map[string]any{
 		"blocks": blocks,
 	}
 }
@@ -237,6 +368,10 @@ func getEmbedBlock(c *gin.Context) {
 func updateEmbedBlock(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
+
+	if model.IsReadOnlyRoleContext(c) {
+		return
+	}
 
 	arg, ok := util.JsonArg(c, ret)
 	if !ok {
@@ -247,7 +382,7 @@ func updateEmbedBlock(c *gin.Context) {
 	content := arg["content"].(string)
 
 	err := model.UpdateEmbedBlock(id, content)
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
@@ -265,12 +400,16 @@ func searchEmbedBlock(c *gin.Context) {
 
 	embedBlockID := arg["embedBlockID"].(string)
 	stmt := arg["stmt"].(string)
-	excludeIDsArg := arg["excludeIDs"].([]interface{})
+	boxID, _ := arg["notebook"].(string)
+	excludeIDsArg := arg["excludeIDs"].([]any)
 	var excludeIDs []string
 	for _, excludeID := range excludeIDsArg {
+		if nil == excludeID {
+			continue
+		}
 		excludeIDs = append(excludeIDs, excludeID.(string))
 	}
-	headingMode := 0 // 0：带标题下方块
+	headingMode := 0 // 0：显示标题与下方的块，1：仅显示标题，2：仅显示标题下方的块
 	headingModeArg := arg["headingMode"]
 	if nil != headingModeArg {
 		headingMode = int(headingModeArg.(float64))
@@ -281,8 +420,43 @@ func searchEmbedBlock(c *gin.Context) {
 		breadcrumb = breadcrumbArg.(bool)
 	}
 
-	blocks := model.SearchEmbedBlock(embedBlockID, stmt, excludeIDs, headingMode, breadcrumb)
-	ret.Data = map[string]interface{}{
+	isReadOnlyRole := model.IsReadOnlyRoleContext(c)
+	var publishAccess model.PublishAccess
+	if isReadOnlyRole {
+		publishAccess = model.GetPublishAccess()
+		if !model.CheckBlockIdAccessableByPublishAccess(c, publishAccess, embedBlockID) {
+			ret.Code = -1
+			ret.Msg = fmt.Sprintf(model.Conf.Language(15), embedBlockID)
+			return
+		}
+		var err error
+		stmt, boxID, err = model.GetQueryEmbedStatement(embedBlockID)
+		if nil != err {
+			ret.Code = -1
+			ret.Msg = err.Error()
+			return
+		}
+	}
+
+	if err := sql.CheckSingleStatement(stmt); nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+	if err := sql.CheckReadonlyStatementInBox(stmt, boxID); nil != err {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+
+	var blocks []*model.EmbedBlock
+	if isReadOnlyRole {
+		blocks = model.SearchEmbedBlockForPublish(embedBlockID, stmt, excludeIDs, headingMode, breadcrumb, boxID)
+		blocks = model.FilterEmbedBlocksByPublishAccess(c, publishAccess, blocks)
+	} else {
+		blocks = model.SearchEmbedBlockInBox(embedBlockID, stmt, excludeIDs, headingMode, breadcrumb, boxID)
+	}
+	ret.Data = map[string]any{
 		"blocks": blocks,
 	}
 }
@@ -297,8 +471,24 @@ func searchRefBlock(c *gin.Context) {
 	}
 
 	reqId := arg["reqId"]
-	ret.Data = map[string]interface{}{"reqId": reqId}
+	ret.Data = map[string]any{"reqId": reqId}
 	if nil == arg["id"] {
+		return
+	}
+
+	notebook, _ := arg["notebook"].(string)
+	if isEncryptedNotebookDeniedForPublish(c, notebook) {
+		ret.Data = map[string]any{
+			"blocks": []*model.Block{},
+			"newDoc": false,
+			"k":      util.EscapeHTML(arg["k"].(string)),
+			"reqId":  reqId,
+		}
+		return
+	}
+	if err := holdEncryptedBoxRequest(c, notebook); err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
 		return
 	}
 
@@ -307,12 +497,28 @@ func searchRefBlock(c *gin.Context) {
 		isSquareBrackets = isSquareBracketsArg.(bool)
 	}
 
+	isDatabase := false
+	if isDatabaseArg := arg["isDatabase"]; nil != isDatabaseArg {
+		isDatabase = isDatabaseArg.(bool)
+	}
+
 	rootID := arg["rootID"].(string)
 	id := arg["id"].(string)
 	keyword := arg["k"].(string)
 	beforeLen := int(arg["beforeLen"].(float64))
-	blocks, newDoc := model.SearchRefBlock(id, rootID, keyword, beforeLen, isSquareBrackets)
-	ret.Data = map[string]interface{}{
+	// 加密笔记本内的块引搜索走 InBox 版（只搜该 box 自己的加密 db，阻止跨加密边界引用）
+	var blocks []*model.Block
+	var newDoc bool
+	if notebook != "" && model.IsEncryptedBox(notebook) {
+		blocks, newDoc = model.SearchRefBlockInBox(id, rootID, keyword, beforeLen, isSquareBrackets, isDatabase, notebook)
+	} else {
+		blocks, newDoc = model.SearchRefBlock(id, rootID, keyword, beforeLen, isSquareBrackets, isDatabase)
+	}
+	if model.IsReadOnlyRoleContext(c) {
+		publishAccess := model.GetPublishAccess()
+		blocks = model.FilterBlocksByPublishAccess(c, publishAccess, blocks)
+	}
+	ret.Data = map[string]any{
 		"blocks": blocks,
 		"newDoc": newDoc,
 		"k":      util.EscapeHTML(keyword),
@@ -329,17 +535,62 @@ func fullTextSearchBlock(c *gin.Context) {
 		return
 	}
 
-	page, pageSize, query, paths, boxes, types, method, orderBy, groupBy := parseSearchBlockArgs(arg)
-	blocks, matchedBlockCount, matchedRootCount, pageCount := model.FullTextSearchBlock(query, boxes, paths, types, method, orderBy, groupBy, page, pageSize)
-	ret.Data = map[string]interface{}{
+	page, pageSize, query, paths, boxes, types, subTypes, method, orderBy, groupBy := parseSearchBlockArgs(arg)
+
+	// SQL mode requires admin privileges, consistent with /api/query/sql
+	if method == 2 && !model.IsAdminRoleContext(c) {
+		ret.Code = -1
+		ret.Msg = "SQL search requires administrator privileges"
+		return
+	}
+
+	notebook, _ := arg["notebook"].(string)
+	if isEncryptedNotebookDeniedForPublish(c, notebook) {
+		ret.Data = map[string]any{
+			"blocks":            []*model.Block{},
+			"matchedBlockCount": 0,
+			"matchedRootCount":  0,
+			"pageCount":         0,
+			"docMode":           false,
+		}
+		return
+	}
+
+	var blocks []*model.Block
+	var matchedBlockCount, matchedRootCount, pageCount int
+	var docMode bool
+	searchHPath := true
+	if value, ok := arg["searchHPath"].(bool); ok {
+		searchHPath = value
+	}
+	// 加密笔记本的全文搜索走 InBox 版（查加密 content db + blocks_fts）
+	if notebook != "" && model.IsEncryptedBox(notebook) {
+		if err := holdEncryptedBoxRequest(c, notebook); err != nil {
+			ret.Code = -1
+			ret.Msg = err.Error()
+			return
+		}
+		blocks, matchedBlockCount, matchedRootCount, pageCount, docMode = model.FullTextSearchBlockInBoxWithHPathContext(c.Request.Context(), query, boxes, paths, types, subTypes, method, orderBy, groupBy, page, pageSize, notebook, searchHPath)
+	} else {
+		blocks, matchedBlockCount, matchedRootCount, pageCount, docMode = model.FullTextSearchBlockInBoxWithHPathContext(c.Request.Context(), query, boxes, paths, types, subTypes, method, orderBy, groupBy, page, pageSize, "", searchHPath)
+	}
+	if c.Request.Context().Err() != nil {
+		return
+	}
+	if model.IsReadOnlyRoleContext(c) {
+		publishAccess := model.GetPublishAccess()
+		blocks = model.FilterBlocksByPublishAccess(c, publishAccess, blocks)
+	}
+	ret.Data = map[string]any{
 		"blocks":            blocks,
 		"matchedBlockCount": matchedBlockCount,
 		"matchedRootCount":  matchedRootCount,
 		"pageCount":         pageCount,
+		"docMode":           docMode,
 	}
 }
 
-func parseSearchBlockArgs(arg map[string]interface{}) (page, pageSize int, query string, paths, boxes []string, types map[string]bool, method, orderBy, groupBy int) {
+func parseSearchBlockArgs(arg map[string]any) (page, pageSize int, query string, paths, boxes []string, types, subTypes map[string]bool, method, orderBy, groupBy int) {
 	page = 1
 	if nil != arg["page"] {
 		page = int(arg["page"].(float64))
@@ -363,13 +614,18 @@ func parseSearchBlockArgs(arg map[string]interface{}) (page, pageSize int, query
 
 	pathsArg := arg["paths"]
 	if nil != pathsArg {
-		for _, p := range pathsArg.([]interface{}) {
+		for _, p := range pathsArg.([]any) {
 			path := p.(string)
 			box := strings.TrimSpace(strings.Split(path, "/")[0])
+			path = strings.TrimSpace(strings.TrimPrefix(path, box))
+			// 入口校验：拒绝带 SQL 元字符的非法笔记本 ID 与文档路径，阻止 SQL 注入。
+			// 与既有静默去重风格一致，对非法整条丢弃而非中断请求。
+			if !model.IsValidSearchBoxPath(box, path) {
+				continue
+			}
 			if "" != box {
 				boxes = append(boxes, box)
 			}
-			path = strings.TrimSpace(strings.TrimPrefix(path, box))
 			if "" != path {
 				paths = append(paths, path)
 			}
@@ -379,10 +635,18 @@ func parseSearchBlockArgs(arg map[string]interface{}) (page, pageSize int, query
 	}
 
 	if nil != arg["types"] {
-		typesArg := arg["types"].(map[string]interface{})
+		typesArg := arg["types"].(map[string]any)
 		types = map[string]bool{}
 		for t, b := range typesArg {
 			types[t] = b.(bool)
+		}
+	}
+
+	if nil != arg["subTypes"] {
+		subTypesArg := arg["subTypes"].(map[string]any)
+		subTypes = map[string]bool{}
+		for t, b := range subTypesArg {
+			subTypes[t] = b.(bool)
 		}
 	}
 
@@ -406,7 +670,7 @@ func parseSearchBlockArgs(arg map[string]interface{}) (page, pageSize int, query
 	return
 }
 
-func parseSearchAssetContentArgs(arg map[string]interface{}) (page, pageSize int, query string, types map[string]bool, method, orderBy int) {
+func parseSearchAssetContentArgs(arg map[string]any) (page, pageSize int, query string, types map[string]bool, method, orderBy int) {
 	page = 1
 	if nil != arg["page"] {
 		page = int(arg["page"].(float64))
@@ -429,7 +693,7 @@ func parseSearchAssetContentArgs(arg map[string]interface{}) (page, pageSize int
 	}
 
 	if nil != arg["types"] {
-		typesArg := arg["types"].(map[string]interface{})
+		typesArg := arg["types"].(map[string]any)
 		types = map[string]bool{}
 		for t, b := range typesArg {
 			types[t] = b.(bool)
@@ -448,4 +712,28 @@ func parseSearchAssetContentArgs(arg map[string]interface{}) (page, pageSize int
 		orderBy = int(orderByArg.(float64))
 	}
 	return
+}
+
+func semanticSearchBlock(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	page, pageSize, query, paths, boxes, types, subTypes, _, _, _ := parseSearchBlockArgs(arg)
+
+	blocks, matchedBlockCount, matchedRootCount, pageCount := model.SemanticSearchBlock(query, boxes, paths, types, subTypes, page, pageSize)
+	if model.IsReadOnlyRoleContext(c) {
+		publishAccess := model.GetPublishAccess()
+		blocks = model.FilterBlocksByPublishAccess(c, publishAccess, blocks)
+	}
+	ret.Data = map[string]any{
+		"blocks":            blocks,
+		"matchedBlockCount": matchedBlockCount,
+		"matchedRootCount":  matchedRootCount,
+		"pageCount":         pageCount,
+	}
 }

@@ -1,11 +1,12 @@
 {
 	"ID": "20210615213222-vs5tzbd",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20210615213222-vs5tzbd",
 		"title": "Data history",
-		"updated": "20230422102255"
+		"type": "doc",
+		"updated": "20260809232000"
 	},
 	"Children": [
 		{
@@ -153,7 +154,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220615120326-oxyzckb",
-				"updated": "20220615120330"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -168,7 +169,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220615120326-dopr4db",
-				"updated": "20220615120326"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -183,7 +184,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20220501135308-30uwxvd",
-				"updated": "20230403114455"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -195,7 +196,7 @@
 					},
 					"Properties": {
 						"id": "20220501135308-kwaramc",
-						"updated": "20220831210614"
+						"updated": "20260809232000"
 					},
 					"Children": [
 						{
@@ -203,12 +204,12 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220501135308-yr7v67z",
-								"updated": "20220831210614"
+								"updated": "20260809232000"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "Every 10 minutes, a history will be generated for the documents updated within these 10 minutes (the interval can be set by "
+									"Data": "Every 10 minutes, file history is generated for documents and files updated during that interval. The interval can be adjusted in "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -217,34 +218,25 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​ - "
+									"Data": " - "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Editor"
+									"TextMarkTextContent": "Document"
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​ - "
+									"Data": " - "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "History Generation Interval"
+									"TextMarkTextContent": "History generation interval"
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​ make adjustments), and the suffix of the history folder is "
-								},
-								{
-									"Type": "NodeTextMark",
-									"TextMarkType": "code",
-									"TextMarkTextContent": "-update"
-								},
-								{
-									"Type": "NodeText",
-									"Data": "​"
+									"Data": ", and the history folder uses the suffix -update."
 								}
 							]
 						}
@@ -272,7 +264,15 @@
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "When synchronizing in the cloud, the local data covered by the cloud will generate a history, and the suffix of the history folder is "
+									"Data": "When synchronizing in the cloud, the local data covered by the cloud will generate "
+								},
+								{
+									"Type": "NodeText",
+									"Data": "a"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " history, and the suffix of the history folder is "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -357,7 +357,15 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": ", a history will be generated, and the suffix of the history folder is "
+									"Data": ", "
+								},
+								{
+									"Type": "NodeText",
+									"Data": "a"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " history will be generated, and the suffix of the history folder is "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -405,7 +413,15 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": ", a history will be generated, and the suffix of the history folder is "
+									"Data": ", "
+								},
+								{
+									"Type": "NodeText",
+									"Data": "a"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " history will be generated, and the suffix of the history folder is "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -429,7 +445,7 @@
 					},
 					"Properties": {
 						"id": "20230403114321-4rwhj6j",
-						"updated": "20230403114424"
+						"updated": "20240402174245"
 					},
 					"Children": [
 						{
@@ -437,7 +453,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230403114321-tou7etc",
-								"updated": "20230403114424"
+								"updated": "20240402174245"
 							},
 							"Children": [
 								{
@@ -451,12 +467,49 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​, a history will be generated, and the suffix of the history folder "
+									"Data": "​, a history will be generated, and the suffix of the history folder is "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "code",
 									"TextMarkTextContent": "-replace"
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​"
+								}
+							]
+						}
+					]
+				},
+				{
+					"ID": "20240402174218-u5vrt8y",
+					"Type": "NodeListItem",
+					"ListData": {
+						"BulletChar": 42,
+						"Marker": "Kg=="
+					},
+					"Properties": {
+						"id": "20240402174218-u5vrt8y",
+						"updated": "20240402174243"
+					},
+					"Children": [
+						{
+							"ID": "20240402174218-9x6w0bk",
+							"Type": "NodeParagraph",
+							"Properties": {
+								"id": "20240402174218-9x6w0bk",
+								"updated": "20240402174243"
+							},
+							"Children": [
+								{
+									"Type": "NodeText",
+									"Data": "When dragging an outline item in the outline panel, a history will be generated, and the suffix of the history folder is "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "code",
+									"TextMarkTextContent": "-outline"
 								},
 								{
 									"Type": "NodeText",
@@ -474,7 +527,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220501135308-2rn9rgb",
-				"updated": "20220615120407"
+				"updated": "20250115153512"
 			},
 			"Children": [
 				{
@@ -489,7 +542,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20220501135308-3azjqzh",
-				"updated": "20220830230739"
+				"updated": "20250115153512"
 			},
 			"Children": [
 				{
@@ -501,7 +554,7 @@
 					},
 					"Properties": {
 						"id": "20220501135308-itmzgsj",
-						"updated": "20220830230739"
+						"updated": "20250115153512"
 					},
 					"Children": [
 						{
@@ -509,7 +562,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220501135308-yvsiton",
-								"updated": "20220830230739"
+								"updated": "20260720201253"
 							},
 							"Children": [
 								{
@@ -523,16 +576,25 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": " button on the top toolbar or "
+									"Data": "​ button on the top toolbar or "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Alt+H"
+									"TextMarkTextContent": "Alt"
 								},
 								{
 									"Type": "NodeText",
-									"Data": " to open the data history interface, switch to the "
+									"Data": "​+"
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "H"
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​ to open the data history interface, switch to the "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -541,16 +603,16 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": " tab, if no historical data is displayed , you can try "
+									"Data": "​ tab, if no historical data is displayed , you can try "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Reindex"
+									"TextMarkTextContent": "Rebuild history index"
 								},
 								{
 									"Type": "NodeText",
-									"Data": " of this interface"
+									"Data": "​ of this interface"
 								}
 							]
 						}
@@ -601,7 +663,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20210104091559-kgrtuyh",
-				"updated": "20220615120446"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -916,7 +978,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220615120602-rhii2c7",
-				"updated": "20220615120602"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -930,7 +992,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220615120602-mjy7por",
-				"updated": "20220615120602"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -949,7 +1011,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Editor"
+					"TextMarkTextContent": "Documents"
 				},
 				{
 					"Type": "NodeText",
@@ -971,7 +1033,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220615120602-3fqyf3h",
-				"updated": "20220830230506"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -990,7 +1052,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Editor"
+					"TextMarkTextContent": "Documents"
 				},
 				{
 					"Type": "NodeText",
@@ -1017,7 +1079,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Reindex"
+					"TextMarkTextContent": "Rebuild history index"
 				},
 				{
 					"Type": "NodeText",
@@ -1040,7 +1102,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220615120602-drz9hwc",
-				"updated": "20220615120658"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -1055,7 +1117,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220615120602-iya2886",
-				"updated": "20220615120602"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -1069,7 +1131,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220615120602-wipwu6g",
-				"updated": "20220615120742"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -1097,7 +1159,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "About"
+					"TextMarkTextContent": "Account & Sync"
 				},
 				{
 					"Type": "NodeText",
@@ -1254,7 +1316,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220615120602-wp2lnbq",
-				"updated": "20220615120602"
+				"updated": "20250115153528"
 			},
 			"Children": [
 				{
@@ -1271,7 +1333,7 @@
 			},
 			"Properties": {
 				"id": "20220615120602-5r3nl34",
-				"updated": "20220625231856"
+				"updated": "20250115153528"
 			},
 			"Children": [
 				{
@@ -1285,7 +1347,7 @@
 					},
 					"Properties": {
 						"id": "20220615120602-a20qin2",
-						"updated": "20220625231856"
+						"updated": "20250115153528"
 					},
 					"Children": [
 						{
@@ -1293,7 +1355,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220615120602-k0xs8n5",
-								"updated": "20220625231856"
+								"updated": "20250115153528"
 							},
 							"Children": [
 								{
@@ -1307,16 +1369,25 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": " button on the top toolbar or "
+									"Data": "​ button on the top toolbar or "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Alt+H"
+									"TextMarkTextContent": "Alt"
 								},
 								{
 									"Type": "NodeText",
-									"Data": " to open the data history interface"
+									"Data": "​+"
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "H"
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​ to open the data history interface"
 								}
 							]
 						}
@@ -1485,7 +1556,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220615120602-nhnnujh",
-				"updated": "20230422102056"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -1500,7 +1571,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230422101614-mdijztr",
-				"updated": "20230422102255"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -1512,7 +1583,7 @@
 					},
 					"Properties": {
 						"id": "20230422101614-5lwp8u3",
-						"updated": "20230422102255"
+						"updated": "20260803163440"
 					},
 					"Children": [
 						{
@@ -1520,12 +1591,12 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230422101614-5kvwhn7",
-								"updated": "20230422102255"
+								"updated": "20260803163440"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "​"
+									"Data": "​ "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -1539,7 +1610,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "About"
+									"TextMarkTextContent": "Account & Sync"
 								},
 								{
 									"Type": "NodeText",
@@ -1552,7 +1623,7 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​ will delete all unreferenced snapshots and related data objects. \"Referenced snapshots\" refer to snapshots pointed to under repo/refs/:"
+									"Data": " ​ will delete all unreferenced snapshots and related data objects. \"Referenced snapshots\" refer to snapshots pointed to under repo/refs/:"
 								}
 							]
 						},
@@ -1688,7 +1759,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20210928101257-l27t5uo",
-				"updated": "20210928101257"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -1702,7 +1773,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20210928101257-3m7efdr",
-				"updated": "20210928220616"
+				"updated": "20260809160000"
 			},
 			"Children": [
 				{
@@ -1717,6 +1788,34 @@
 				{
 					"Type": "NodeText",
 					"Data": " on the file system, each line is configured with the relative path of the data folder, which means that the path of the file or folder is ignored and wildcard characters are supported. E.g:"
+				}
+			]
+		},
+		{
+			"ID": "20260809160000-3ab2338",
+			"Type": "NodeCodeBlock",
+			"IsFencedCodeBlock": true,
+			"Properties": {
+				"id": "20260809160000-3ab2338",
+				"updated": "20260809232000"
+			},
+			"Children": [
+				{
+					"Type": "NodeCodeBlockFenceOpenMarker",
+					"Data": "```",
+					"CodeBlockFenceLen": 3
+				},
+				{
+					"Type": "NodeCodeBlockFenceInfoMarker"
+				},
+				{
+					"Type": "NodeCodeBlockCode",
+					"Data": "20210808180117-6v0mkxr/**/*\nassets/*.pdf"
+				},
+				{
+					"Type": "NodeCodeBlockFenceCloseMarker",
+					"Data": "```",
+					"CodeBlockFenceLen": 3
 				}
 			]
 		},

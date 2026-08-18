@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -17,43 +17,16 @@
 package api
 
 import (
-	"mime"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/88250/gulu"
 	"github.com/88250/lute/ast"
 	"github.com/gin-gonic/gin"
-	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
-
-func serveSnippets(c *gin.Context) {
-	filePath := strings.TrimPrefix(c.Request.URL.Path, "/snippets/")
-	ext := filepath.Ext(filePath)
-	name := strings.TrimSuffix(filePath, ext)
-	confSnippets, err := model.LoadSnippets()
-	if nil != err {
-		logging.LogErrorf("load snippets failed: %s", err)
-		c.Status(404)
-		return
-	}
-
-	for _, s := range confSnippets {
-		if s.Name == name && ("" != ext && s.Type == ext[1:]) {
-			c.Header("Content-Type", mime.TypeByExtension(ext))
-			c.String(http.StatusOK, s.Content)
-			return
-		}
-	}
-
-	// 没有在配置文件中命中时在文件系统上查找
-	filePath = filepath.Join(util.SnippetsPath, filePath)
-	c.File(filePath)
-}
 
 func getSnippet(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
@@ -64,31 +37,62 @@ func getSnippet(c *gin.Context) {
 		return
 	}
 
-	typ := arg["type"].(string)                 // js/css/all
-	enabledArg := int(arg["enabled"].(float64)) // 0：禁用，1：启用，2：全部
+	var typ string         // js/css/all
+	var enabledArg float64 // 0：禁用，1：启用，2：全部
+	var keyword string
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("type", &typ, true, true),
+		util.BindJsonArg("enabled", &enabledArg, true, false),
+		util.BindJsonArg("keyword", &keyword, false, false),
+	) {
+		return
+	}
+
 	enabled := true
-	if 0 == enabledArg {
+	if 0 == int(enabledArg) {
 		enabled = false
 	}
 
 	confSnippets, err := model.LoadSnippets()
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = "load snippets failed: " + err.Error()
 		return
 	}
 
+	isPublish := model.IsReadOnlyRoleContext(c)
 	var snippets []*conf.Snippet
 	for _, s := range confSnippets {
-		if ("all" == typ || s.Type == typ) && (2 == enabledArg || s.Enabled == enabled) {
-			snippets = append(snippets, s)
+		if isPublish && s.DisabledInPublish {
+			continue
 		}
+		if "all" != typ && s.Type != typ {
+			continue
+		}
+		if 2 != enabledArg && s.Enabled != enabled {
+			continue
+		}
+
+		snippets = append(snippets, s)
 	}
+
+	keyword = strings.TrimSpace(keyword)
+	if "" != keyword {
+		keyword = strings.ToLower(keyword)
+		var snippetsFiltered []*conf.Snippet
+		for _, s := range snippets {
+			if strings.Contains(strings.ToLower(s.Name), keyword) || strings.Contains(strings.ToLower(s.Content), keyword) {
+				snippetsFiltered = append(snippetsFiltered, s)
+			}
+		}
+		snippets = snippetsFiltered
+	}
+
 	if 1 > len(snippets) {
 		snippets = []*conf.Snippet{}
 	}
 
-	ret.Data = map[string]interface{}{
+	ret.Data = map[string]any{
 		"snippets": snippets,
 	}
 }
@@ -102,10 +106,10 @@ func setSnippet(c *gin.Context) {
 		return
 	}
 
-	snippetsArg := arg["snippets"].([]interface{})
+	snippetsArg := arg["snippets"].([]any)
 	var snippets []*conf.Snippet
 	for _, s := range snippetsArg {
-		m := s.(map[string]interface{})
+		m := s.(map[string]any)
 		snippet := &conf.Snippet{
 			ID:      m["id"].(string),
 			Name:    m["name"].(string),
@@ -113,14 +117,24 @@ func setSnippet(c *gin.Context) {
 			Content: m["content"].(string),
 			Enabled: m["enabled"].(bool),
 		}
+		if nil != m["disabledInPublish"] {
+			snippet.DisabledInPublish = m["disabledInPublish"].(bool)
+		}
 		if "" == snippet.ID {
 			snippet.ID = ast.NewNodeID()
+		}
+		if "css" == snippet.Type {
+			if strings.Contains(strings.ToLower(snippet.Content), "</style") || strings.Contains(strings.ToLower(snippet.Content), "<script") {
+				ret.Code = -1
+				ret.Msg = "invalid css snippet content"
+				return
+			}
 		}
 		snippets = append(snippets, snippet)
 	}
 
 	err := model.SetSnippet(snippets)
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = "set snippet failed: " + err.Error()
 		return
@@ -136,9 +150,12 @@ func removeSnippet(c *gin.Context) {
 		return
 	}
 
-	id := arg["id"].(string)
+	var id string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("id", &id, true, true)) {
+		return
+	}
 	snippet, err := model.RemoveSnippet(id)
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = "remove snippet failed: " + err.Error()
 		return

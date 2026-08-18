@@ -1,11 +1,12 @@
 {
 	"ID": "20211226121438-xaafdo8",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20211226121438-xaafdo8",
 		"title": "資料同步",
-		"updated": "20231120213316"
+		"type": "doc",
+		"updated": "20260803163402"
 	},
 	"Children": [
 		{
@@ -14,7 +15,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20211226121454-8vr6fgn",
-				"updated": "20211226010158"
+				"updated": "20250218121017"
 			},
 			"Children": [
 				{
@@ -28,7 +29,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20211226121454-2wnvrmj",
-				"updated": "20211228141310"
+				"updated": "20250218121017"
 			},
 			"Children": [
 				{
@@ -42,7 +43,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 文件夾資料一致，包括資料文件、範本、小工具以及筆記本資料。"
+					"Data": "​ 文件夾資料一致，包括資源檔案、自訂圖示、外掛程式、程式碼片段、範本、掛件和文件資料。"
 				}
 			]
 		},
@@ -52,7 +53,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20211226121454-g3niy0i",
-				"updated": "20211226010158"
+				"updated": "20250115162655"
 			},
 			"Children": [
 				{
@@ -118,7 +119,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "設置"
+									"TextMarkTextContent": "設定"
 								},
 								{
 									"Type": "NodeText",
@@ -127,7 +128,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "雲端"
+									"TextMarkTextContent": "帳號與同步"
 								},
 								{
 									"Type": "NodeText",
@@ -204,7 +205,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230220103637-v3wy8lv",
-				"updated": "20230220103721"
+				"updated": "20250115162655"
 			},
 			"Children": [
 				{
@@ -244,7 +245,7 @@
 					},
 					"Properties": {
 						"id": "20230220103640-opmw3uo",
-						"updated": "20230220103640"
+						"updated": "20250115162655"
 					},
 					"Children": [
 						{
@@ -252,17 +253,17 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230220103640-gpbn39m",
-								"updated": "20230220103641"
+								"updated": "20250115162655"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "如果資料量較大，建議通過設置中的 "
+									"Data": "如果資料量較大，建議通過設定中的 "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "導出 - Data"
+									"TextMarkTextContent": "導出 Data"
 								},
 								{
 									"Type": "NodeText",
@@ -271,7 +272,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "導入 - Data"
+									"TextMarkTextContent": "導入 Data"
 								},
 								{
 									"Type": "NodeText",
@@ -289,7 +290,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230219121211-f7pvncg",
-				"updated": "20230219121211"
+				"updated": "20260803163402"
 			},
 			"Children": [
 				{
@@ -303,7 +304,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230219121211-z22snch",
-				"updated": "20230219121229"
+				"updated": "20260803163402"
 			},
 			"Children": [
 				{
@@ -313,7 +314,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "設置"
+					"TextMarkTextContent": "設定"
 				},
 				{
 					"Type": "NodeText",
@@ -322,7 +323,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "雲端"
+					"TextMarkTextContent": "帳號與同步"
 				},
 				{
 					"Type": "NodeText",
@@ -335,7 +336,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": "​ 中支持三種同步模式："
+					"Data": " ​ 中支持三種同步模式："
 				}
 			]
 		},
@@ -1127,7 +1128,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20211226121454-0nlneiq",
-				"updated": "20211226010158"
+				"updated": "20260614203626"
 			},
 			"Children": [
 				{
@@ -1143,7 +1144,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20211226121454-kv5itch",
-				"updated": "20231120213316"
+				"updated": "20260614203626"
 			},
 			"Children": [
 				{
@@ -1196,15 +1197,35 @@
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "請勿同時使用第三方同步碟和"
-								},
+									"Data": "請勿同時使用第三方同步碟和思源同步，可能會導致資料損壞"
+								}
+							]
+						}
+					]
+				},
+				{
+					"ID": "20260614203626-5d8grrv",
+					"Type": "NodeListItem",
+					"ListData": {
+						"BulletChar": 42,
+						"Marker": "Kg=="
+					},
+					"Properties": {
+						"id": "20260614203626-5d8grrv",
+						"updated": "20260614203626"
+					},
+					"Children": [
+						{
+							"ID": "20260614203626-1xm9wts",
+							"Type": "NodeParagraph",
+							"Properties": {
+								"id": "20260614203626-1xm9wts",
+								"updated": "20260614203626"
+							},
+							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "思源"
-								},
-								{
-									"Type": "NodeText",
-									"Data": "同步，可能會導致資料損壞"
+									"Data": "思源會自動檢測工作空間是否位於第三方同步目錄下，如果檢測到會強制退出以防止資料損壞"
 								}
 							]
 						}

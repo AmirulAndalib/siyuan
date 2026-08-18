@@ -1,12 +1,12 @@
 {
 	"ID": "20200813125307-pxsjela",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20200813125307-pxsjela",
 		"title": "导入和导出",
 		"type": "doc",
-		"updated": "20220511190018"
+		"updated": "20260809232000"
 	},
 	"Children": [
 		{
@@ -15,7 +15,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20201229120428-dgzkno8",
-				"updated": "20201229120428"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -30,7 +30,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220511184321-um53ppo",
-				"updated": "20220511184328"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -72,7 +72,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 的图片语法（本地相对路径），则思源会将 "
+					"Data": "​ 的图片语法（本地相对路径），则思源会将 "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -81,7 +81,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 转换为"
+					"Data": "​ 转换为"
 				},
 				{
 					"Type": "NodeTextMark",
@@ -101,7 +101,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 则不会转换，因为 "
+					"Data": "​ 则不会转换，因为 "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -110,7 +110,84 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 开头的路径文件属于隐藏文件，思源不会进行处理。"
+					"Data": "​ 开头的路径文件属于隐藏文件，思源不会进行处理。"
+				}
+			]
+		},
+		{
+			"ID": "20240426184018-e8mz594",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20240426184018-e8mz594",
+				"updated": "20260803163440"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": "如果需要识别一些扩展语法（比如 上标 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "^foo^"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、下标 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "~foo~"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、标签 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "#foo"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ 和公式 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "$foo$"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ 等），请打开 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "设置"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "编辑器"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "Markdown 语法"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " ​ 相关开关。"
 				}
 			]
 		},
@@ -120,7 +197,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220511184340-6w8o7kg",
-				"updated": "20220511184359"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -134,39 +211,30 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220511184359-mea18d0",
-				"updated": "20220511184938"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "在桌面端 "
+					"Data": "桌面端和移动端均可在 "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "设置 "
+					"TextMarkTextContent": "设置"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "- "
+					"Data": " - "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "导出"
+					"TextMarkTextContent": "应用"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "、移动端右侧栏 "
-				},
-				{
-					"Type": "NodeTextMark",
-					"TextMarkType": "kbd",
-					"TextMarkTextContent": "关于"
-				},
-				{
-					"Type": "NodeText",
-					"Data": " 中可以进行数据导入和导出。这里的导出会将 "
+					"Data": " 中进行数据导入和导出。该导出会完整复制 "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -175,7 +243,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 文件夹完整复制并打包为 zip 压缩包。"
+					"Data": " 文件夹并打包为 ZIP 压缩包。"
 				}
 			]
 		},
@@ -311,13 +379,69 @@
 			},
 			"Children": [
 				{
+					"Type": "NodeText",
+					"Data": "​"
+				},
+				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "tag",
 					"TextMarkTextContent": "注意"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "：使用前请务必留意，避免已有数据被覆盖无法恢复。"
+					"Data": "​：使用前请务必留意，避免已有数据被覆盖无法恢复。"
+				}
+			]
+		},
+		{
+			"ID": "20260614200806-k4r9npq",
+			"Type": "NodeHeading",
+			"HeadingLevel": 3,
+			"Properties": {
+				"id": "20260614200806-k4r9npq",
+				"updated": "20260809232000"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": ".sy.zip"
+				}
+			]
+		},
+		{
+			"ID": "20260614200806-6qg8yqx",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20260614200806-6qg8yqx",
+				"updated": "20260809232000"
+			},
+			"Children": [
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": ".sy.zip"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " 是思源原生文档格式。在文档树中选择目标笔记本或文档后，使用 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "导入"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "SiYuan .sy.zip"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " 选择压缩包。导入后的文档会保留内容、设置中指定包含的子文档、资源文件和块属性。"
 				}
 			]
 		},
@@ -326,7 +450,8 @@
 			"Type": "NodeHeading",
 			"HeadingLevel": 2,
 			"Properties": {
-				"id": "20201229120428-9k34lga"
+				"id": "20201229120428-9k34lga",
+				"updated": "20250115151439"
 			},
 			"Children": [
 				{
@@ -344,7 +469,8 @@
 			"Type": "NodeHeading",
 			"HeadingLevel": 3,
 			"Properties": {
-				"id": "20210120154937-u6g9q4l"
+				"id": "20210120154937-u6g9q4l",
+				"updated": "20250115151439"
 			},
 			"Children": [
 				{
@@ -362,7 +488,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20201229120428-uk4lxtt",
-				"updated": "20220317223050"
+				"updated": "20250115151037"
 			},
 			"Children": [
 				{
@@ -372,11 +498,20 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Ctrl+C"
+					"TextMarkTextContent": "Ctrl"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 即可，剪切板中是标准 Markdown 文本。"
+					"Data": "​+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "C"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ 即可，剪切板中是标准 Markdown 文本。"
 				}
 			]
 		},
@@ -385,7 +520,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220317223052-qrqe13g",
-				"updated": "20220317224423"
+				"updated": "20250115151439"
 			},
 			"Children": [
 				{
@@ -395,11 +530,11 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "..."
+					"TextMarkTextContent": "︙"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 菜单中的 "
+					"Data": "​ 菜单中的 "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -408,7 +543,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 切换到 "
+					"Data": "​ 切换到 "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -417,7 +552,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 后再进行复制。"
+					"Data": "​ 后再进行复制。"
 				}
 			]
 		},
@@ -426,7 +561,8 @@
 			"Type": "NodeHeading",
 			"HeadingLevel": 3,
 			"Properties": {
-				"id": "20210120154948-gl0hxz6"
+				"id": "20210120154948-gl0hxz6",
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -444,12 +580,12 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20201229120428-ysyvyt4",
-				"updated": "20220317224436"
+				"updated": "20260426175436"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "在文档树上选择文档后右键选择 "
+					"Data": "在文档上选择文档后右键选择 "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -458,16 +594,16 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 或者编辑器页签右上角的 "
+					"Data": "​ 或者编辑器页签右上角的 "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "..."
+					"TextMarkTextContent": "︙"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 菜单中选择 "
+					"Data": "​ 菜单中选择 "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -476,7 +612,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": "："
+					"Data": "​："
 				}
 			]
 		},
@@ -486,7 +622,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20201229120428-sokahme",
-				"updated": "20220317223356"
+				"updated": "20260614200822"
 			},
 			"Children": [
 				{
@@ -497,7 +633,8 @@
 						"Marker": "Kg=="
 					},
 					"Properties": {
-						"id": "20201229120428-3zal4fw"
+						"id": "20201229120428-3zal4fw",
+						"updated": "20201229120428"
 					},
 					"Children": [
 						{
@@ -524,14 +661,16 @@
 						"Marker": "Kg=="
 					},
 					"Properties": {
-						"id": "20201229120428-rbzugkm"
+						"id": "20201229120428-rbzugkm",
+						"updated": "20201229120428"
 					},
 					"Children": [
 						{
 							"ID": "20210302223614-6mzkgcu",
 							"Type": "NodeParagraph",
 							"Properties": {
-								"id": "20210302223614-6mzkgcu"
+								"id": "20210302223614-6mzkgcu",
+								"updated": "20210302223614"
 							},
 							"Children": [
 								{
@@ -550,14 +689,16 @@
 						"Marker": "Kg=="
 					},
 					"Properties": {
-						"id": "20210120155702-mhp0c0s"
+						"id": "20210120155702-mhp0c0s",
+						"updated": "20210120155702"
 					},
 					"Children": [
 						{
 							"ID": "20210302223614-zc7v8ds",
 							"Type": "NodeParagraph",
 							"Properties": {
-								"id": "20210302223614-zc7v8ds"
+								"id": "20210302223614-zc7v8ds",
+								"updated": "20210302223614"
 							},
 							"Children": [
 								{
@@ -595,6 +736,71 @@
 							]
 						}
 					]
+				},
+				{
+					"ID": "20260614200822-ltvmpym",
+					"Type": "NodeListItem",
+					"ListData": {
+						"BulletChar": 42,
+						"Marker": "Kg=="
+					},
+					"Properties": {
+						"id": "20260614200822-ltvmpym",
+						"updated": "20260614200822"
+					},
+					"Children": [
+						{
+							"ID": "20260614200822-0hldom5",
+							"Type": "NodeParagraph",
+							"Properties": {
+								"id": "20260614200822-0hldom5",
+								"updated": "20260614200822"
+							},
+							"Children": [
+								{
+									"Type": "NodeText",
+									"Data": ".sy.zip"
+								}
+							]
+						}
+					]
+				}
+			]
+		},
+		{
+			"ID": "20260614200829-qq1g8hc",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20260614200829-qq1g8hc",
+				"updated": "20260809232000"
+			},
+			"Children": [
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": ".sy.zip"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " 格式会保留文档内容、资源文件和块属性。是否包含子文档和关联文档取决于 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "设置"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "导出"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " 中的对应选项。"
 				}
 			]
 		},

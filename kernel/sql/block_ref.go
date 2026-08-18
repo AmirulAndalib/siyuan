@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -38,10 +38,10 @@ type Ref struct {
 }
 
 func upsertRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
-	if err = deleteRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
-	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
 	err = insertRefs(tx, tree)
@@ -49,11 +49,22 @@ func upsertRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
 }
 
 func deleteRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
-	if err = deleteRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
-	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
 	return
+}
+
+func insertRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
+	refs, fileAnnotationRefs := refsFromTree(tree)
+	if err = insertBlockRefs(tx, refs); err != nil {
+		return
+	}
+	if err = insertFileAnnotationRefs(tx, fileAnnotationRefs); err != nil {
+		return
+	}
+	return err
 }

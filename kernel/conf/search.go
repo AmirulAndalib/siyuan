@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -38,9 +38,15 @@ type Search struct {
 	HTMLBlock     bool `json:"htmlBlock"`
 	EmbedBlock    bool `json:"embedBlock"`
 	DatabaseBlock bool `json:"databaseBlock"`
+	AudioBlock    bool `json:"audioBlock"`
+	VideoBlock    bool `json:"videoBlock"`
+	IFrameBlock   bool `json:"iframeBlock"`
+	WidgetBlock   bool `json:"widgetBlock"`
+	Callout       bool `json:"callout"`
 
-	Limit         int  `json:"limit"`
-	CaseSensitive bool `json:"caseSensitive"`
+	Limit         int   `json:"limit"`
+	CaseSensitive bool  `json:"caseSensitive"`
+	HanSensitive  *bool `json:"hanSensitive"` // 区分繁简：默认开启（与既往行为一致）；关闭后全文搜索不区分简体/繁体中文字形
 
 	Name  bool `json:"name"`
 	Alias bool `json:"alias"`
@@ -65,20 +71,26 @@ func NewSearch() *Search {
 	return &Search{
 		Document:      true,
 		Heading:       true,
-		List:          true,
-		ListItem:      true,
+		List:          false,
+		ListItem:      false,
 		CodeBlock:     true,
 		MathBlock:     true,
 		Table:         true,
-		Blockquote:    true,
-		SuperBlock:    true,
+		Blockquote:    false,
+		SuperBlock:    false,
 		Paragraph:     true,
 		HTMLBlock:     true,
 		EmbedBlock:    false,
 		DatabaseBlock: true,
+		AudioBlock:    false,
+		VideoBlock:    false,
+		IFrameBlock:   false,
+		WidgetBlock:   false,
+		Callout:       false,
 
 		Limit:         64,
 		CaseSensitive: false,
+		HanSensitive:  new(true),
 
 		Name:  true,
 		Alias: true,
@@ -98,6 +110,22 @@ func NewSearch() *Search {
 		VirtualRefAnchor: true,
 		VirtualRefDoc:    true,
 	}
+}
+
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }
+
+// HanSensitiveVal 返回 HanSensitive 的 bool 值；nil 视为 true（与既往行为一致）。
+func (s *Search) HanSensitiveVal() bool {
+	if s.HanSensitive == nil {
+		return true
+	}
+	return *s.HanSensitive
+}
+
+// SetHanSensitive 设置 HanSensitive 字段。
+func (s *Search) SetHanSensitive(v bool) {
+	s.HanSensitive = new(v)
 }
 
 func (s *Search) NAMFilter(keyword string) string {
@@ -195,11 +223,36 @@ func (s *Search) TypeFilter() string {
 		buf.WriteByte('\'')
 		buf.WriteString(",")
 	}
-
-	// 无法搜索到 iframe 块、视频块和音频块 https://github.com/siyuan-note/siyuan/issues/3604
-	buf.WriteString("'iframe','video','audio',")
-	// 挂件块支持内置属性搜索 https://github.com/siyuan-note/siyuan/issues/4497
-	buf.WriteString("'widget',")
+	if s.AudioBlock {
+		buf.WriteByte('\'')
+		buf.WriteString(treenode.TypeAbbr(ast.NodeAudio.String()))
+		buf.WriteByte('\'')
+		buf.WriteString(",")
+	}
+	if s.VideoBlock {
+		buf.WriteByte('\'')
+		buf.WriteString(treenode.TypeAbbr(ast.NodeVideo.String()))
+		buf.WriteByte('\'')
+		buf.WriteString(",")
+	}
+	if s.IFrameBlock {
+		buf.WriteByte('\'')
+		buf.WriteString(treenode.TypeAbbr(ast.NodeIFrame.String()))
+		buf.WriteByte('\'')
+		buf.WriteString(",")
+	}
+	if s.WidgetBlock {
+		buf.WriteByte('\'')
+		buf.WriteString(treenode.TypeAbbr(ast.NodeWidget.String()))
+		buf.WriteByte('\'')
+		buf.WriteString(",")
+	}
+	if s.Callout {
+		buf.WriteByte('\'')
+		buf.WriteString(treenode.TypeAbbr(ast.NodeCallout.String()))
+		buf.WriteByte('\'')
+		buf.WriteString(",")
+	}
 
 	ret := buf.String()
 	if "" == ret {

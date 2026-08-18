@@ -1,5 +1,23 @@
 import {Menu} from "../../../plugin/Menu";
 import {transaction} from "../../wysiwyg/transaction";
+import {Constants} from "../../../constants";
+import {getAllEditor, getAllModels} from "../../../layout/getAll";
+
+const refreshDatabaseAttributePanels = (protyle: IProtyle, avID: string) => {
+    protyle.databaseAttributePanel?.refresh();
+    getAllEditor().forEach((editor) => {
+        if (editor.protyle !== protyle && editor.protyle.databaseAttributePanel?.hasDatabase(avID)) {
+            editor.protyle.databaseAttributePanel.refresh();
+        }
+    });
+    /// #if !MOBILE
+    getAllModels().custom.forEach((model) => {
+        if (model.type === "siyuan-database-row" && model.data.avID === avID) {
+            model.update?.();
+        }
+    });
+    /// #endif
+};
 
 const addFormatItem = (options: {
     menu: Menu,
@@ -26,7 +44,9 @@ const addFormatItem = (options: {
                 avID: options.avID,
                 format: options.oldFormat,
                 type: "number",
-            }]);
+            }], {
+                callback: () => refreshDatabaseAttributePanels(options.protyle, options.avID),
+            });
             options.avPanelElement.remove();
         }
     });
@@ -40,7 +60,7 @@ export const formatNumber = (options: {
     avID: string,
     oldFormat: string
 }) => {
-    const menu = new Menu("av-col-format-number");
+    const menu = new Menu(Constants.MENU_AV_COL_FORMAT_NUMBER);
     addFormatItem({
         menu,
         protyle: options.protyle,
@@ -73,7 +93,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "usDollar",
+        format: "USD",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -82,7 +102,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "yuan",
+        format: "CNY",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -91,7 +111,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "euro",
+        format: "EUR",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -100,7 +120,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "pound",
+        format: "GBP",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -109,7 +129,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "yen",
+        format: "JPY",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -118,7 +138,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "ruble",
+        format: "RUB",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -127,7 +147,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "rupee",
+        format: "INR",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -136,7 +156,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "won",
+        format: "KRW",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -145,7 +165,7 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "canadianDollar",
+        format:"TRY",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
@@ -154,10 +174,92 @@ export const formatNumber = (options: {
         protyle: options.protyle,
         colId: options.colId,
         avID: options.avID,
-        format: "franc",
+        format: "CAD",
         oldFormat: options.oldFormat,
         avPanelElement: options.avPanelElement,
     });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "CHF",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "THB",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "AUD",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "HKD",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "TWD",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "MOP",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "SGD",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format: "NZD",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+    addFormatItem({
+        menu,
+        protyle: options.protyle,
+        colId: options.colId,
+        avID: options.avID,
+        format:"ILS",
+        oldFormat: options.oldFormat,
+        avPanelElement: options.avPanelElement,
+    });
+
     const rect = options.element.getBoundingClientRect();
     menu.open({
         x: rect.left,
@@ -169,32 +271,13 @@ export const formatNumber = (options: {
 };
 
 export const getLabelByNumberFormat = (format: string) => {
-    switch (format) {
-        case "":
-            return window.siyuan.languages.numberFormatNone;
-        case "commas":
-            return window.siyuan.languages.numberFormatCommas;
-        case "percent":
-            return window.siyuan.languages.numberFormatPercent;
-        case "usDollar":
-            return window.siyuan.languages.numberFormatUSDollar;
-        case "yuan":
-            return window.siyuan.languages.numberFormatYuan;
-        case "euro":
-            return window.siyuan.languages.numberFormatEuro;
-        case "pound":
-            return window.siyuan.languages.numberFormatPound;
-        case "yen":
-            return window.siyuan.languages.numberFormatYen;
-        case "ruble":
-            return window.siyuan.languages.numberFormatRuble;
-        case "rupee":
-            return window.siyuan.languages.numberFormatRupee;
-        case "won":
-            return window.siyuan.languages.numberFormatWon;
-        case "canadianDollar":
-            return window.siyuan.languages.numberFormatCanadianDollar;
-        case "franc":
-            return window.siyuan.languages.numberFormatFranc;
+    if ("" === format) {
+        return window.siyuan.languages.numberFormatNone;
+    } else if ("commas" === format) {
+        return window.siyuan.languages.numberFormatCommas;
+    } else if ("percent" === format) {
+        return window.siyuan.languages.numberFormatPercent;
     }
+
+    return window.siyuan.languages["numberFormat" + format];
 };

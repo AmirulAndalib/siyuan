@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -17,13 +17,31 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 
 	"github.com/88250/gulu"
 	"github.com/gin-gonic/gin"
+	"github.com/siyuan-note/logging"
+	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+// rejectEncryptedArchivePath 检查路径是否落入加密笔记本目录（含 symlink 绕过），是则返回错误。
+func rejectEncryptedArchivePath(absPath string) error {
+	boxID := model.ExtractBoxIDFromAssetsPath(absPath)
+	if boxID != "" && model.IsEncryptedBox(boxID) {
+		return fmt.Errorf("path belongs to encrypted notebook [%s]", boxID)
+	}
+	if resolved := util.ResolveLongestExistingParent(absPath); resolved != absPath {
+		boxID = model.ExtractBoxIDFromAssetsPath(resolved)
+		if boxID != "" && model.IsEncryptedBox(boxID) {
+			return fmt.Errorf("symlink resolves into encrypted notebook [%s]", boxID)
+		}
+	}
+	return nil
+}
 
 func zip(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
@@ -34,26 +52,41 @@ func zip(c *gin.Context) {
 		return
 	}
 
-	entryPath := arg["path"].(string)
+	var entryPath, zipFilePath string
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("path", &entryPath, true, true),      // 相对于工作空间的路径（待打包目录或文件）
+		util.BindJsonArg("zipPath", &zipFilePath, true, true), // 相对于工作空间的路径（生成的 zip）
+	) {
+		return
+	}
 	entryAbsPath, err := util.GetAbsPathInWorkspace(entryPath)
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
-
-	zipFilePath := arg["zipPath"].(string)
+	if err = rejectEncryptedArchivePath(entryAbsPath); err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
 	zipAbsFilePath, err := util.GetAbsPathInWorkspace(zipFilePath)
-	if nil != err {
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+	if err = rejectEncryptedArchivePath(zipAbsFilePath); err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
 
 	zipFile, err := gulu.Zip.Create(zipAbsFilePath)
-	if nil != err {
+	if err != nil {
+		logging.LogErrorf("create zip [%s] failed: %s", zipAbsFilePath, err)
 		ret.Code = -1
-		ret.Msg = err.Error()
+		ret.Msg = "create zip file failed" + errMsgSeeKernelLog
 		return
 	}
 
@@ -63,15 +96,17 @@ func zip(c *gin.Context) {
 	} else {
 		err = zipFile.AddEntry(base, entryAbsPath)
 	}
-	if nil != err {
+	if err != nil {
+		logging.LogErrorf("zip add entry [%s] failed: %s", entryAbsPath, err)
 		ret.Code = -1
-		ret.Msg = err.Error()
+		ret.Msg = "zip failed" + errMsgSeeKernelLog
 		return
 	}
 
-	if err = zipFile.Close(); nil != err {
+	if err = zipFile.Close(); err != nil {
+		logging.LogErrorf("close zip [%s] failed: %s", zipAbsFilePath, err)
 		ret.Code = -1
-		ret.Msg = err.Error()
+		ret.Msg = "close zip file failed" + errMsgSeeKernelLog
 		return
 	}
 }
@@ -85,25 +120,46 @@ func unzip(c *gin.Context) {
 		return
 	}
 
-	zipFilePath := arg["zipPath"].(string)
+	var zipFilePath, entryPath string
+	if !util.ParseJsonArgs(arg, ret,
+		util.BindJsonArg("zipPath", &zipFilePath, true, true), // 相对于工作空间的路径
+		util.BindJsonArg("path", &entryPath, true, false),     // 相对于工作空间的路径（解压目标目录）
+	) {
+		return
+	}
 	zipAbsFilePath, err := util.GetAbsPathInWorkspace(zipFilePath)
-	if nil != err {
+	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
-
-	entryPath := arg["path"].(string)
+	if err = rejectEncryptedArchivePath(zipAbsFilePath); err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
 	entryAbsPath, err := util.GetAbsPathInWorkspace(entryPath)
-	if nil != err {
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+	if err = rejectEncryptedArchivePath(entryAbsPath); err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
 		return
 	}
 
-	if err := gulu.Zip.Unzip(zipAbsFilePath, entryAbsPath); nil != err {
+	if !gulu.File.IsExist(zipAbsFilePath) {
 		ret.Code = -1
-		ret.Msg = err.Error()
+		ret.Msg = "zip file does not exist"
+		return
+	}
+
+	if err := gulu.Zip.Unzip(zipAbsFilePath, entryAbsPath); err != nil {
+		logging.LogErrorf("unzip [%s] -> [%s] failed: %s", zipAbsFilePath, entryAbsPath, err)
+		ret.Code = -1
+		ret.Msg = "unzip failed" + errMsgSeeKernelLog
 		return
 	}
 }

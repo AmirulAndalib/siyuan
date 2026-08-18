@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -22,65 +22,150 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/siyuan-note/riff"
-	"github.com/siyuan-note/siyuan/kernel/av"
 	"image"
 	"image/jpeg"
 	"image/png"
 	"io"
 	"io/fs"
-	"math/rand"
+	"maps"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/88250/gulu"
+	"github.com/88250/lute"
 	"github.com/88250/lute/ast"
 	"github.com/88250/lute/html"
 	"github.com/88250/lute/html/atom"
 	"github.com/88250/lute/parse"
 	"github.com/88250/lute/render"
+	util2 "github.com/88250/lute/util"
+	"github.com/siyuan-note/dataparser"
 	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/logging"
+	"github.com/siyuan-note/riff"
+	"github.com/siyuan-note/siyuan/kernel/av"
+	"github.com/siyuan-note/siyuan/kernel/cache"
+	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/sql"
+	"github.com/siyuan-note/siyuan/kernel/task"
 	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func HTML2Markdown(htmlStr string) (markdown string, err error) {
-	assetDirPath := filepath.Join(util.DataDir, "assets")
-	luteEngine := util.NewLute()
-	tree := luteEngine.HTML2Tree(htmlStr)
+// GetImportAssetsDir 返回导入资源的落盘目录。普通笔记本复用已有本地目录，否则回退到全局目录。
+func GetImportAssetsDir(boxID, docDirLocalPath string) string {
+	globalAssetsDir := filepath.Join(util.DataDir, "assets")
+	if !ast.IsNodeIDPattern(boxID) {
+		return globalAssetsDir
+	}
+
+	boxLocalPath := filepath.Join(util.DataDir, boxID)
+	boxAssetsDir := filepath.Join(boxLocalPath, "assets")
+	if IsEncryptedBox(boxID) {
+		return boxAssetsDir
+	}
+
+	if docDirLocalPath != "" && gulu.File.IsSubPath(boxLocalPath, docDirLocalPath) {
+		docAssetsDir := filepath.Join(docDirLocalPath, "assets")
+		if gulu.File.IsDir(docAssetsDir) {
+			return docAssetsDir
+		}
+	}
+	if gulu.File.IsDir(boxAssetsDir) {
+		return boxAssetsDir
+	}
+	return globalAssetsDir
+}
+
+func HTML2Tree(htmlStr string, luteEngine *lute.Lute, boxID string) (tree *parse.Tree, withMath bool) {
+	htmlStr = gulu.Str.RemovePUA(htmlStr)
+	assetDirPath := GetImportAssetsDir(boxID, "")
+	_ = os.MkdirAll(assetDirPath, 0755)
+	tree = luteEngine.HTML2Tree(htmlStr)
 	ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
-		if !entering || ast.NodeLinkDest != n.Type {
+		if !entering {
 			return ast.WalkContinue
 		}
 
-		dest := n.TokensStr()
-		if strings.HasPrefix(dest, "data:image") && strings.Contains(dest, ";base64,") {
-			processBase64Img(n, dest, assetDirPath, err)
-			return ast.WalkContinue
+		switch n.Type {
+		case ast.NodeHTMLBlock:
+			if bytes.HasPrefix(n.Tokens, []byte("<pre ")) && bytes.HasSuffix(n.Tokens, []byte("</pre>")) {
+				if bytes.Contains(n.Tokens, []byte("data:image/svg+xml;base64")) {
+					matches := regexp.MustCompile(`(?sU)<pre [^>]*>(.*)</pre>`).FindSubmatch(n.Tokens)
+					if len(matches) >= 2 {
+						n.Tokens = matches[1]
+					}
+					subTree := parse.Inline("", n.Tokens, luteEngine.ParseOptions)
+					if nil != subTree && nil != subTree.Root && nil != subTree.Root.FirstChild {
+						n.Type = ast.NodeParagraph
+						var children []*ast.Node
+						for c := subTree.Root.FirstChild.FirstChild; nil != c; c = c.Next {
+							children = append(children, c)
+						}
+						for _, c := range children {
+							n.AppendChild(c)
+						}
+					}
+				} else if bytes.Contains(n.Tokens, []byte("<svg")) {
+					processHTMLBlockSvgImg(n, assetDirPath, boxID)
+				}
+			}
+		case ast.NodeText:
+			if n.ParentIs(ast.NodeTableCell) {
+				n.Tokens = bytes.ReplaceAll(n.Tokens, []byte("\\|"), []byte("|"))
+				n.Tokens = bytes.ReplaceAll(n.Tokens, []byte("|"), []byte("\\|"))
+				n.Tokens = bytes.ReplaceAll(n.Tokens, []byte("\\<br /\\>"), []byte("<br />"))
+			}
+		case ast.NodeInlineMath:
+			withMath = true
+		case ast.NodeLinkDest:
+			dest := n.TokensStr()
+			if strings.HasPrefix(dest, "data:image") && strings.Contains(dest, ";base64,") {
+				processBase64Img(n, dest, assetDirPath, boxID)
+			}
 		}
 		return ast.WalkContinue
 	})
-
-	var formatted []byte
-	renderer := render.NewFormatRenderer(tree, luteEngine.RenderOptions)
-	for nodeType, rendererFunc := range luteEngine.HTML2MdRendererFuncs {
-		renderer.ExtRendererFuncs[nodeType] = rendererFunc
-	}
-	formatted = renderer.Render()
-	markdown = gulu.Str.FromBytes(formatted)
 	return
 }
 
 func ImportSY(zipPath, boxID, toPath string) (err error) {
+	if isSYNotebookBundle(zipPath) {
+		return errors.New(Conf.Language(373))
+	}
+	_, err = importSY(zipPath, boxID, toPath, false, false)
+	return
+}
+
+func ImportSYNotebook(zipPath string) (boxID string, err error) {
+	return importSY(zipPath, "", "/", true, false)
+}
+
+var ErrSYTargetNotebookRequired = errors.New("target notebook required")
+
+func ImportSYAuto(zipPath, boxID, toPath string) (createdBoxID string, notebook bool, err error) {
+	createdBoxID, err = importSY(zipPath, boxID, toPath, false, true)
+	notebook = err == nil && createdBoxID != boxID
+	return
+}
+
+func isSYNotebookExport(hasBoxConf, hasBoxDocMeta bool) bool {
+	return hasBoxConf || hasBoxDocMeta
+}
+
+func importSY(zipPath, boxID, toPath string, createNotebook, autoDetect bool) (createdBoxID string, err error) {
+	return importSY0(zipPath, boxID, toPath, createNotebook, autoDetect, nil, false)
+}
+
+func importSY0(zipPath, boxID, toPath string, createNotebook, autoDetect bool, sharedBlockIDs map[string]string,
+	precreatedBox bool) (createdBoxID string, err error) {
 	util.PushEndlessProgress(Conf.Language(73))
 	defer util.ClearPushProgress(100)
 
@@ -92,85 +177,238 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 	baseName = strings.TrimSuffix(baseName, ext)
 	unzipPath := filepath.Join(filepath.Dir(zipPath), baseName+"-"+gulu.Rand.String(7))
 	err = gulu.Zip.Unzip(zipPath, unzipPath)
-	if nil != err {
+	if err != nil {
 		return
 	}
 	defer os.RemoveAll(unzipPath)
 
 	var syPaths []string
-	filelock.Walk(unzipPath, func(path string, info fs.FileInfo, err error) error {
-		if nil != err {
+	filelock.Walk(unzipPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
 			return err
 		}
-
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".sy") {
+		if d == nil {
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".sy") {
 			syPaths = append(syPaths, path)
 		}
 		return nil
 	})
 
-	unzipRootPaths, err := filepath.Glob(unzipPath + "/*")
-	if nil != err {
+	entries, err := os.ReadDir(unzipPath)
+	if err != nil {
+		logging.LogErrorf("read unzip dir [%s] failed: %s", unzipPath, err)
 		return
 	}
-	if 1 != len(unzipRootPaths) {
-		logging.LogErrorf("invalid .sy.zip")
-		return errors.New(Conf.Language(199))
+	if 1 != len(entries) || !entries[0].IsDir() {
+		logging.LogErrorf("invalid .sy.zip [%v]", entries)
+		err = errors.New(Conf.Language(199))
+		return
 	}
-	unzipRootPath := unzipRootPaths[0]
+	unzipRootPath := filepath.Join(unzipPath, entries[0].Name())
 	name := filepath.Base(unzipRootPath)
 	if strings.HasPrefix(name, "data-20") && len("data-20230321175442") == len(name) {
-		return errors.New(Conf.Language(199))
+		logging.LogErrorf("invalid .sy.zip [unzipRootPath=%s, baseName=%s]", unzipRootPath, name)
+		err = errors.New(Conf.Language(199))
+		return
 	}
+	var importedBoxConf *conf.BoxConf
+	importedConfPath := filepath.Join(unzipRootPath, ".siyuan", "conf.json")
+	hasImportedBoxConf := filelock.IsExist(importedConfPath)
+	var importedMetadataErr error
+	if hasImportedBoxConf {
+		confData, readErr := filelock.ReadFile(importedConfPath)
+		if readErr == nil {
+			importedBoxConf = conf.NewBoxConf()
+			if unmarshalErr := gulu.JSON.UnmarshalJSON(confData, importedBoxConf); unmarshalErr != nil {
+				logging.LogWarnf("parse imported notebook conf failed: %s", unmarshalErr)
+				importedBoxConf = nil
+				importedMetadataErr = unmarshalErr
+			}
+		} else {
+			logging.LogWarnf("read imported notebook conf failed: %s", readErr)
+			importedMetadataErr = readErr
+		}
+		if removeErr := filelock.Remove(importedConfPath); removeErr != nil {
+			err = removeErr
+			return
+		}
+	}
+	var importedBoxDocID string
+	importedBoxDocPath := filepath.Join(unzipRootPath, ".siyuan", boxDocMetaName)
+	hasImportedBoxDocMeta := filelock.IsExist(importedBoxDocPath)
+	if hasImportedBoxDocMeta {
+		metaData, readErr := filelock.ReadFile(importedBoxDocPath)
+		if readErr == nil {
+			meta := &boxDocMeta{}
+			if unmarshalErr := gulu.JSON.UnmarshalJSON(metaData, meta); unmarshalErr != nil {
+				logging.LogWarnf("parse imported notebook document metadata failed: %s", unmarshalErr)
+				importedMetadataErr = unmarshalErr
+			} else if meta.Spec != boxDocMetaSpec || !ast.IsNodeIDPattern(meta.BoxDocID) {
+				logging.LogWarnf("invalid imported notebook document metadata [spec=%d, id=%s]", meta.Spec, meta.BoxDocID)
+				importedMetadataErr = errors.New("invalid imported notebook document metadata")
+			} else {
+				importedBoxDocID = meta.BoxDocID
+			}
+		} else {
+			logging.LogWarnf("read imported notebook document metadata failed: %s", readErr)
+			importedMetadataErr = readErr
+		}
+		if removeErr := filelock.Remove(importedBoxDocPath); removeErr != nil {
+			err = removeErr
+			return
+		}
+	}
+	notebookExport := isSYNotebookExport(hasImportedBoxConf, hasImportedBoxDocMeta)
+	if len(syPaths) < 1 && !notebookExport {
+		logging.LogErrorf("invalid .sy.zip without documents or notebook metadata [unzipRootPath=%s]", unzipRootPath)
+		err = errors.New(Conf.Language(199))
+		return
+	}
+	if autoDetect {
+		if importedMetadataErr != nil {
+			err = errors.New(Conf.Language(199))
+			return
+		}
+		createNotebook = notebookExport
+	}
+	if !createNotebook && notebookExport {
+		err = errors.New(Conf.Language(373))
+		return
+	}
+	if autoDetect && !createNotebook && boxID == "" {
+		err = ErrSYTargetNotebookRequired
+		return
+	}
+	if !createNotebook && nil == Conf.Box(boxID) {
+		err = errors.New(Conf.Language(0))
+		return
+	}
+	if createNotebook {
+		if importedBoxConf != nil && importedBoxConf.Name != "" {
+			name = importedBoxConf.Name
+		}
+		if !precreatedBox {
+			boxID, err = CreateBox(util.RemoveInvalid(name))
+			if err != nil {
+				return "", err
+			}
+		}
+		createdBoxID = boxID
+		defer func() {
+			if err == nil {
+				return
+			}
+			treenode.RemoveBlockTreesByBoxID(boxID)
+			sql.DeleteBoxQueue(boxID)
+			if removeErr := filelock.Remove(filepath.Join(util.DataDir, boxID)); removeErr != nil {
+				logging.LogErrorf("remove notebook [%s] after import failed: %s", boxID, removeErr)
+			}
+		}()
+		if importedBoxConf != nil {
+			box := &Box{ID: boxID}
+			boxConf := box.GetConf()
+			boxConf.Icon = filterBoxIcon(importedBoxConf.Icon)
+			boxConf.RefCreateSavePath = importedBoxConf.RefCreateSavePath
+			boxConf.DocCreateSavePath = importedBoxConf.DocCreateSavePath
+			boxConf.DocCreateTemplatePath = importedBoxConf.DocCreateTemplatePath
+			boxConf.DailyNoteSavePath = importedBoxConf.DailyNoteSavePath
+			boxConf.DailyNoteTemplatePath = importedBoxConf.DailyNoteTemplatePath
+			boxConf.SortMode = importedBoxConf.SortMode
+			if err = box.SaveConf(boxConf); err != nil {
+				return createdBoxID, err
+			}
+		}
+	} else {
+		createdBoxID = boxID
+	}
+	encryptedTarget := IsEncryptedBox(boxID)
+	storageRiffDir := filepath.Join(unzipRootPath, "storage", "riff")
+	if encryptedTarget && gulu.File.IsExist(storageRiffDir) {
+		return createdBoxID, errors.New(Conf.Language(313))
+	}
+	toPath = normalizeBoxDocTarget(boxID, toPath)
 
 	luteEngine := util.NewLute()
-	blockIDs := map[string]string{}
-	avBlockIDs := map[string]string{}
+	blockIDs := sharedBlockIDs
+	if nil == blockIDs {
+		blockIDs = map[string]string{}
+	}
 	trees := map[string]*parse.Tree{}
+	importedBoxDoc := false
+	containsFlashcardAttrs := false
 
 	// 重新生成块 ID
-	for _, syPath := range syPaths {
+	for i, syPath := range syPaths {
 		data, readErr := os.ReadFile(syPath)
 		if nil != readErr {
 			logging.LogErrorf("read .sy [%s] failed: %s", syPath, readErr)
 			err = readErr
 			return
 		}
-		tree, _, parseErr := filesys.ParseJSON(data, luteEngine.ParseOptions)
+		tree, _, parseErr := dataparser.ParseJSON(data, luteEngine.ParseOptions)
 		if nil != parseErr {
 			logging.LogErrorf("parse .sy [%s] failed: %s", syPath, parseErr)
 			err = parseErr
 			return
 		}
+		oldRootID := tree.Root.ID
 		ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
-			if !entering || "" == n.ID {
+			if !entering {
+				return ast.WalkContinue
+			}
+			if encryptedTarget && n.IsBlock() && n.IALAttr(NodeAttrRiffDecks) != "" {
+				containsFlashcardAttrs = true
+			}
+			if "" == n.ID {
 				return ast.WalkContinue
 			}
 
 			// 新 ID 保留时间部分，仅修改随机值，避免时间变化导致更新时间早于创建时间
 			// Keep original creation time when importing .sy.zip https://github.com/siyuan-note/siyuan/issues/9923
-			newNodeID := util.TimeFromID(n.ID) + "-" + gulu.Rand.String(7)
+			newNodeID := blockIDs[n.ID]
+			if "" == newNodeID {
+				newNodeID = util.TimeFromID(n.ID) + "-" + util.RandString(7)
+			}
+			if createNotebook && oldRootID == importedBoxDocID && n.ID == importedBoxDocID {
+				newNodeID = boxID
+			}
 			blockIDs[n.ID] = newNodeID
-			oldNodeID := n.ID
 			n.ID = newNodeID
 			n.SetIALAttr("id", newNodeID)
 
-			// 重新指向数据库属性值
-			ial := parse.IAL2Map(n.KramdownIAL)
-			for k, _ := range ial {
-				if strings.HasPrefix(k, av.NodeAttrNameAvs) {
-					avBlockIDs[oldNodeID] = newNodeID
-				}
+			if icon := n.IALAttr("icon"); "" != icon {
+				// XSS through emoji name https://github.com/siyuan-note/siyuan/issues/15034
+				icon = filterBoxIcon(icon)
+				n.SetIALAttr("icon", icon)
 			}
+
 			return ast.WalkContinue
 		})
 		tree.ID = tree.Root.ID
 		tree.Path = filepath.ToSlash(strings.TrimPrefix(syPath, unzipRootPath))
+		if createNotebook && oldRootID == importedBoxDocID {
+			importedBoxDoc = true
+			tree.Root.SetIALAttr(DocHiddenAttr, "true")
+		} else if oldRootID == importedBoxDocID {
+			removeBoxDocHiddenAttr(tree)
+		}
 		trees[tree.ID] = tree
+		util.PushEndlessProgress(Conf.language(73) + " " + fmt.Sprintf(Conf.language(70), fmt.Sprintf("%d/%d", i+1, len(syPaths))))
+	}
+	if containsFlashcardAttrs {
+		return createdBoxID, errors.New(Conf.Language(313))
+	}
+	if importedBoxDoc {
+		if err = writeBoxDocID(boxID); err != nil {
+			return
+		}
 	}
 
 	// 引用和嵌入指向重新生成的块 ID
 	for _, tree := range trees {
+		util.PushEndlessProgress(Conf.language(73) + " " + fmt.Sprintf(Conf.language(70), tree.Root.IALAttr("title")))
 		ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
 			if !entering {
 				return ast.WalkContinue
@@ -199,6 +437,26 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		})
 	}
 
+	var replacements []string
+	for oldID, newID := range blockIDs {
+		replacements = append(replacements, oldID, newID)
+	}
+	blockIDReplacer := strings.NewReplacer(replacements...)
+
+	assetPathMap, err := importSYAssets(unzipRootPath, boxID)
+	if err != nil {
+		return createdBoxID, err
+	}
+
+	assetRewriteOptions := assetReferenceRewriteOptions{
+		pathMap:       assetPathMap,
+		targetBoxID:   boxID,
+		bindTargetBox: IsEncryptedBox(boxID),
+	}
+	for _, tree := range trees {
+		rewriteTreeAssetReferences(tree, assetRewriteOptions)
+	}
+
 	// 将关联的数据库文件移动到 data/storage/av/ 下
 	storage := filepath.Join(unzipRootPath, "storage")
 	storageAvDir := filepath.Join(storage, "av")
@@ -206,14 +464,28 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 	renameAvPaths := map[string]string{}
 	if gulu.File.IsExist(storageAvDir) {
 		// 重新生成数据库数据
-		filelock.Walk(storageAvDir, func(path string, info fs.FileInfo, err error) error {
-			if !strings.HasSuffix(path, ".json") || !ast.IsNodeIDPattern(strings.TrimSuffix(info.Name(), ".json")) {
+		filelock.Walk(storageAvDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d == nil {
+				return nil
+			}
+
+			if ".json" == d.Name() { // https://github.com/siyuan-note/siyuan/issues/16637
+				if removeErr := os.RemoveAll(path); nil != removeErr {
+					logging.LogErrorf("remove empty av file [%s] failed: %s", path, removeErr)
+				}
+				return nil
+			}
+
+			if !strings.HasSuffix(path, ".json") || !ast.IsNodeIDPattern(strings.TrimSuffix(d.Name(), ".json")) {
 				return nil
 			}
 
 			// 重命名数据库
 			newAvID := ast.NewNodeID()
-			oldAvID := strings.TrimSuffix(info.Name(), ".json")
+			oldAvID := strings.TrimSuffix(d.Name(), ".json")
 			newPath := filepath.Join(filepath.Dir(path), newAvID+".json")
 			renameAvPaths[path] = newPath
 			avIDs[oldAvID] = newAvID
@@ -225,37 +497,52 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 			data, readErr := os.ReadFile(oldPath)
 			if nil != readErr {
 				logging.LogErrorf("read av file [%s] failed: %s", oldPath, readErr)
-				return nil
+				err = readErr
+				return
 			}
 
-			// 将数据库文件中的块 ID 替换为新的块 ID
+			// 将数据库文件中的 ID 替换为新的 ID
 			newData := data
 			for oldAvID, newAvID := range avIDs {
-				for oldID, newID := range avBlockIDs {
-					newData = bytes.ReplaceAll(newData, []byte(oldID), []byte(newID))
-				}
 				newData = bytes.ReplaceAll(newData, []byte(oldAvID), []byte(newAvID))
+			}
+			newData = []byte(blockIDReplacer.Replace(string(newData)))
+			newData, err = rewriteAttributeViewDataAssetReferences(newData, assetRewriteOptions)
+			if err != nil {
+				logging.LogErrorf("rewrite imported attribute view assets [%s] failed: %s", oldPath, err)
+				return
 			}
 			if !bytes.Equal(data, newData) {
 				if writeErr := os.WriteFile(oldPath, newData, 0644); nil != writeErr {
 					logging.LogErrorf("write av file [%s] failed: %s", oldPath, writeErr)
-					return nil
+					err = writeErr
+					return
 				}
 			}
 
-			if err = os.Rename(oldPath, newPath); nil != err {
+			if err = os.Rename(oldPath, newPath); err != nil {
 				logging.LogErrorf("rename av file from [%s] to [%s] failed: %s", oldPath, newPath, err)
 				return
 			}
 		}
 
-		targetStorageAvDir := filepath.Join(util.DataDir, "storage", "av")
-		if copyErr := filelock.Copy(storageAvDir, targetStorageAvDir); nil != copyErr {
-			logging.LogErrorf("copy storage av dir from [%s] to [%s] failed: %s", storageAvDir, targetStorageAvDir, copyErr)
+		// 加密笔记本的 AV 定义不能拷到全局目录（明文泄漏 + 路由冲突），
+		// 需要先加密写入 <boxID>/storage/av/，后续 mirror/relation 操作才能正确路由
+		if !IsEncryptedBox(boxID) {
+			targetStorageAvDir := filepath.Join(util.DataDir, "storage", "av")
+			if copyErr := filelock.Copy(storageAvDir, targetStorageAvDir); nil != copyErr {
+				logging.LogErrorf("copy storage av dir from [%s] to [%s] failed: %s", storageAvDir, targetStorageAvDir, copyErr)
+			}
+		} else {
+			// 加密笔记本：先把 AV 定义加密写入笔记本级目录，建立 box 映射后 mirror/relation 才能正确路由
+			if err = encryptBoxAVFiles(boxID, storageAvDir); err != nil {
+				return
+			}
 		}
 
 		// 重新指向数据库属性值
 		for _, tree := range trees {
+			util.PushEndlessProgress(Conf.language(73) + " " + fmt.Sprintf(Conf.language(70), tree.Root.IALAttr("title")))
 			ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
 				if !entering || "" == n.ID {
 					return ast.WalkContinue
@@ -279,11 +566,38 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 				}
 				return ast.WalkContinue
 			})
+
+		}
+
+		// 如果数据库中绑定的块不在导入的文档中，则需要单独更新这些绑定块的属性
+		var attrViewIDs []string
+		for _, avID := range avIDs {
+			attrViewIDs = append(attrViewIDs, avID)
+		}
+		updateBoundBlockAvsAttribute(attrViewIDs)
+
+		// 插入关联关系 https://github.com/siyuan-note/siyuan/issues/11628
+		relationAvs := map[string]string{}
+		for _, avID := range avIDs {
+			attrView, _ := av.ParseAttributeView(avID)
+			if nil == attrView {
+				continue
+			}
+
+			for _, keyValues := range attrView.KeyValues {
+				if nil != keyValues.Key && av.KeyTypeRelation == keyValues.Key.Type && nil != keyValues.Key.Relation {
+					relationAvs[avID] = keyValues.Key.Relation.AvID
+				}
+			}
+		}
+
+		for srcAvID, destAvID := range relationAvs {
+			av.UpsertAvBackRel(srcAvID, destAvID)
 		}
 	}
 
 	// 将关联的闪卡数据合并到默认卡包 data/storage/riff/20230218211946-2kw8jgx 中
-	storageRiffDir := filepath.Join(storage, "riff")
+	storageRiffDir = filepath.Join(storage, "riff")
 	if gulu.File.IsExist(storageRiffDir) {
 		deckToImport, loadErr := riff.LoadDeck(storageRiffDir, builtinDeckID, Conf.Flashcard.RequestRetention, Conf.Flashcard.MaximumInterval, Conf.Flashcard.Weights)
 		if nil != loadErr {
@@ -301,7 +615,7 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 			bIDs := deckToImport.GetBlockIDs()
 			cards := deckToImport.GetCardsByBlockIDs(bIDs)
 			for _, card := range cards {
-				deck.AddCard(card.ID(), blockIDs[card.BlockID()])
+				deck.AddCard(ast.NewNodeID(), blockIDs[card.BlockID()])
 			}
 
 			if 0 < len(cards) {
@@ -313,38 +627,51 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 	}
 
 	// storage 文件夹已在上方处理，所以这里删除源 storage 文件夹，避免后面被拷贝到导入目录下 targetDir
+	// 加密笔记本已在上面完成 notebook 级 AV 拷贝，安全删除
+
 	if removeErr := os.RemoveAll(storage); nil != removeErr {
-		logging.LogErrorf("remove temp storage av dir failed: %s", removeErr)
+		logging.LogErrorf("remove temp storage av dir [%s] failed: %s", storage, removeErr)
+	}
+
+	if 1 > len(avIDs) { // 如果本次没有导入数据库，则清理掉文档中的数据库属性 https://github.com/siyuan-note/siyuan/issues/13011
+		for _, tree := range trees {
+			ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
+				if !entering || !n.IsBlock() {
+					return ast.WalkContinue
+				}
+
+				n.RemoveIALAttr(av.NodeAttrNameAvs)
+				return ast.WalkContinue
+			})
+		}
 	}
 
 	// 写回 .sy
 	for _, tree := range trees {
+		util.PushEndlessProgress(Conf.language(73) + " " + fmt.Sprintf(Conf.language(70), tree.Root.IALAttr("title")))
 		syPath := filepath.Join(unzipRootPath, tree.Path)
-		if "" == tree.Root.Spec {
-			parse.NestedInlines2FlattedSpans(tree, false)
-			tree.Root.Spec = "1"
-		}
-		renderer := render.NewJSONRenderer(tree, luteEngine.RenderOptions)
+		// 加密前确定最终文件名：tree.ID + ".sy"，确保加密 AAD 用的是最终 box-relative path
+		finalSyName := tree.ID + ".sy"
+		finalRelPath := filepath.ToSlash(filepath.Join(filepath.Dir(tree.Path), finalSyName))
+		treenode.UpgradeSpec(tree)
+		renderer := render.NewJSONRenderer(tree, luteEngine.RenderOptions, luteEngine.ParseOptions)
 		data := renderer.Render()
 
 		if !util.UseSingleLineSave {
 			buf := bytes.Buffer{}
 			buf.Grow(1024 * 1024 * 2)
-			if err = json.Indent(&buf, data, "", "\t"); nil != err {
+			if err = json.Indent(&buf, data, "", "\t"); err != nil {
 				return
 			}
 			data = buf.Bytes()
 		}
 
-		if err = os.WriteFile(syPath, data, 0644); nil != err {
-			logging.LogErrorf("write .sy [%s] failed: %s", syPath, err)
+		newSyPath := filepath.Join(filepath.Dir(syPath), finalSyName)
+		if err = writeImportedTree(boxID, syPath, newSyPath, finalRelPath, data); err != nil {
+			logging.LogErrorf("write imported .sy [%s] failed: %s", syPath, err)
 			return
 		}
-		newSyPath := filepath.Join(filepath.Dir(syPath), tree.ID+".sy")
-		if err = filelock.Rename(syPath, newSyPath); nil != err {
-			logging.LogErrorf("rename .sy from [%s] to [%s] failed: %s", syPath, newSyPath, err)
-			return
-		}
+		tree.Path = finalRelPath
 	}
 
 	// 合并 sort.json
@@ -397,17 +724,19 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 
 	// 重命名文件路径
 	renamePaths := map[string]string{}
-	filelock.Walk(unzipRootPath, func(path string, info fs.FileInfo, err error) error {
-		if nil != err {
+	filelock.Walk(unzipRootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
 			return err
 		}
-
-		if info.IsDir() && ast.IsNodeIDPattern(info.Name()) {
+		if d == nil {
+			return nil
+		}
+		if d.IsDir() && ast.IsNodeIDPattern(d.Name()) {
 			renamePaths[path] = path
 		}
 		return nil
 	})
-	for p, _ := range renamePaths {
+	for p := range renamePaths {
 		originalPath := p
 		p = strings.TrimPrefix(p, unzipRootPath)
 		p = filepath.ToSlash(p)
@@ -433,7 +762,7 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 	}
 
 	var oldPaths []string
-	for oldPath, _ := range renamePaths {
+	for oldPath := range renamePaths {
 		oldPaths = append(oldPaths, oldPath)
 	}
 	sort.Slice(oldPaths, func(i, j int) bool {
@@ -441,9 +770,10 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 	})
 	for i, oldPath := range oldPaths {
 		newPath := renamePaths[oldPath]
-		if err = filelock.Rename(oldPath, newPath); nil != err {
+		if err = filelock.Rename(oldPath, newPath); err != nil {
 			logging.LogErrorf("rename path from [%s] to [%s] failed: %s", oldPath, renamePaths[oldPath], err)
-			return errors.New("rename path failed")
+			err = errors.New("rename path failed")
+			return
 		}
 
 		delete(renamePaths, oldPath)
@@ -459,9 +789,7 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		for _, toRemove := range toRemoves {
 			delete(renamePaths, toRemove)
 		}
-		for oldP, newP := range newRenamedPaths {
-			renamePaths[oldP] = newP
-		}
+		maps.Copy(renamePaths, newRenamedPaths)
 		for j := i + 1; j < len(oldPaths); j++ {
 			if strings.HasPrefix(oldPaths[j], oldPath) {
 				renamedOldP := strings.Replace(oldPaths[j], oldPath, newPath, 1)
@@ -470,23 +798,51 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		}
 	}
 
-	// 将包含的资源文件统一移动到 data/assets/ 下
-	var assetsDirs []string
-	filelock.Walk(unzipRootPath, func(path string, info fs.FileInfo, err error) error {
-		if strings.Contains(path, "assets") && info.IsDir() {
-			assetsDirs = append(assetsDirs, path)
+	// AV 定义已在 storage 删除前处理（加密笔记本DEK 加密拷到笔记本级，
+	// 普通 box 拷到全局 storage/av/），这里不再重复处理
+
+	// 将包含的自定义表情统一移动到 data/emojis/ 下
+	unzipRootEmojisPath := filepath.Join(unzipRootPath, "emojis")
+	filelock.Walk(unzipRootEmojisPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d == nil {
+			return nil
+		}
+		if !util.IsValidUploadFileName(d.Name()) {
+			emojiFullName := path
+			fullPathFilteredName := filepath.Join(filepath.Dir(path), util.FilterUploadEmojiFileName(d.Name()))
+			// XSS through emoji name https://github.com/siyuan-note/siyuan/issues/15034
+			logging.LogWarnf("renaming invalid custom emoji file [%s] to [%s]", d.Name(), fullPathFilteredName)
+			if removeErr := filelock.Rename(emojiFullName, fullPathFilteredName); nil != removeErr {
+				logging.LogErrorf("renaming invalid custom emoji file to [%s] failed: %s", fullPathFilteredName, removeErr)
+			}
 		}
 		return nil
 	})
-	dataAssets := filepath.Join(util.DataDir, "assets")
-	for _, assets := range assetsDirs {
-		if gulu.File.IsDir(assets) {
-			if err = filelock.Copy(assets, dataAssets); nil != err {
-				logging.LogErrorf("copy assets from [%s] to [%s] failed: %s", assets, dataAssets, err)
+	var emojiDirs []string
+	filelock.Walk(unzipRootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d == nil || unzipRootPath == path {
+			return nil
+		}
+		if d.Name() == "emojis" && d.IsDir() {
+			emojiDirs = append(emojiDirs, path)
+		}
+		return nil
+	})
+	dataEmojis := filepath.Join(util.DataDir, "emojis")
+	for _, emojis := range emojiDirs {
+		if gulu.File.IsDir(emojis) {
+			if err = filelock.Copy(emojis, dataEmojis); err != nil {
+				logging.LogErrorf("copy emojis from [%s] to [%s] failed: %s", emojis, dataEmojis, err)
 				return
 			}
 		}
-		os.RemoveAll(assets)
+		os.RemoveAll(emojis)
 	}
 
 	var baseTargetPath string
@@ -496,26 +852,32 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		block := treenode.GetBlockTreeRootByPath(boxID, toPath)
 		if nil == block {
 			logging.LogErrorf("not found block by path [%s]", toPath)
-			return nil
+			return createdBoxID, nil
 		}
 		baseTargetPath = strings.TrimSuffix(block.Path, ".sy")
 	}
 
 	targetDir := filepath.Join(util.DataDir, boxID, baseTargetPath)
-	if err = os.MkdirAll(targetDir, 0755); nil != err {
+	if err = os.MkdirAll(targetDir, 0755); err != nil {
 		return
 	}
 
 	var treePaths []string
-	filelock.Walk(unzipRootPath, func(path string, info fs.FileInfo, err error) error {
-		if info.IsDir() {
-			if strings.HasPrefix(info.Name(), ".") {
+	filelock.Walk(unzipRootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d == nil {
+			return nil
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		if !strings.HasSuffix(info.Name(), ".sy") {
+		if !strings.HasSuffix(d.Name(), ".sy") {
 			return nil
 		}
 
@@ -525,29 +887,247 @@ func ImportSY(zipPath, boxID, toPath string) (err error) {
 		return nil
 	})
 
-	if err = filelock.Copy(unzipRootPath, targetDir); nil != err {
+	if err = filelock.Copy(unzipRootPath, targetDir); err != nil {
 		logging.LogErrorf("copy data dir from [%s] to [%s] failed: %s", unzipRootPath, util.DataDir, err)
 		err = errors.New("copy data failed")
 		return
 	}
 
 	boxAbsPath := filepath.Join(util.DataDir, boxID)
+	importedAvIDs := map[string]struct{}{}
+	for _, importedAvID := range avIDs {
+		importedAvIDs[importedAvID] = struct{}{}
+	}
 	for _, treePath := range treePaths {
 		absPath := filepath.Join(targetDir, treePath)
 		p := strings.TrimPrefix(absPath, boxAbsPath)
 		p = filepath.ToSlash(p)
+		cache.RemoveTreeDataInBox(util.GetTreeID(p), boxID)
+		cache.RemoveDocIALInBox(p, boxID)
 		tree, err := filesys.LoadTree(boxID, p, luteEngine)
-		if nil != err {
+		if err != nil {
 			logging.LogErrorf("load tree [%s] failed: %s", treePath, err)
 			continue
 		}
 
 		treenode.IndexBlockTree(tree)
-		sql.UpsertTreeQueue(tree)
+		cache.PutDocIALInBox(tree.Path, tree.Box, parse.IAL2Map(tree.Root.KramdownIAL))
+		var avNodes []*ast.Node
+		for _, avNode := range tree.Root.ChildrenByType(ast.NodeAttributeView) {
+			if _, ok := importedAvIDs[avNode.AttributeViewID]; ok {
+				avNodes = append(avNodes, avNode)
+			}
+		}
+		av.BatchUpsertBlockRel(avNodes)
+		sql.IndexTreeQueue(tree)
+		util.PushEndlessProgress(Conf.language(73) + " " + fmt.Sprintf(Conf.language(70), tree.Root.IALAttr("title")))
 	}
 
 	IncSync()
+
+	task.AppendTask(task.UpdateIDs, util.PushUpdateIDs, blockIDs)
 	return
+}
+
+// importSYAssets 将包内资源写入目标存储，并建立包内路径到目标路径的精确映射。
+// 普通笔记本也保留恒等映射，用于清除旧版加密笔记本导出包中残留的 box 查询参数。
+func importSYAssets(unzipRootPath, boxID string) (assetPathMap map[string]string, err error) {
+	assetPathMap = map[string]string{}
+	var assetsDirs []string
+	if err = filelock.Walk(unzipRootPath, func(currentPath string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d == nil || unzipRootPath == currentPath {
+			return nil
+		}
+		if d.Name() == "assets" && d.IsDir() {
+			assetsDirs = append(assetsDirs, currentPath)
+			return filepath.SkipDir
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	if IsEncryptedBox(boxID) {
+		boxAssetsDir := filepath.Join(util.DataDir, boxID, "assets")
+		if err = os.MkdirAll(boxAssetsDir, 0755); err != nil {
+			return nil, err
+		}
+		for _, assetsDir := range assetsDirs {
+			var assetFiles []string
+			if err = filelock.Walk(assetsDir, func(currentPath string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if d != nil && !d.IsDir() && !strings.HasSuffix(strings.ToLower(d.Name()), ".sya") {
+					assetFiles = append(assetFiles, currentPath)
+				}
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+			sort.Strings(assetFiles)
+			for _, assetFile := range assetFiles {
+				relPath, relErr := filepath.Rel(assetsDir, assetFile)
+				if relErr != nil {
+					return nil, relErr
+				}
+				sourceAssetPath := canonicalAssetReferencePath(path.Join("assets", filepath.ToSlash(relPath)))
+				data, readErr := filelock.ReadFile(assetFile)
+				if readErr != nil {
+					return nil, readErr
+				}
+				diskName, storeErr := storeAssetForBox(boxID, boxAssetsDir, filepath.Base(assetFile), data)
+				if storeErr != nil {
+					return nil, storeErr
+				}
+				assetPathMap[sourceAssetPath] = path.Join("assets", diskName)
+
+				annotationPath := assetFile + ".sya"
+				if filelock.IsExist(annotationPath) {
+					annotationData, annotationReadErr := filelock.ReadFile(annotationPath)
+					if annotationReadErr != nil {
+						return nil, annotationReadErr
+					}
+					annotationTargetPath := filepath.Join(boxAssetsDir, diskName+".sya")
+					if writeErr := writeAssetFile(annotationTargetPath, bytes.NewReader(annotationData), boxID,
+						filepath.Base(annotationPath)); writeErr != nil {
+						return nil, writeErr
+					}
+				}
+			}
+			if removeErr := os.RemoveAll(assetsDir); removeErr != nil {
+				return nil, removeErr
+			}
+		}
+		return assetPathMap, nil
+	}
+
+	dataAssets := filepath.Join(util.DataDir, "assets")
+	for _, assetsDir := range assetsDirs {
+		if err = filelock.Walk(assetsDir, func(currentPath string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d == nil || d.IsDir() || strings.HasSuffix(strings.ToLower(d.Name()), ".sya") {
+				return nil
+			}
+			relPath, relErr := filepath.Rel(assetsDir, currentPath)
+			if relErr != nil {
+				return relErr
+			}
+			assetPath := canonicalAssetReferencePath(path.Join("assets", filepath.ToSlash(relPath)))
+			assetPathMap[assetPath] = assetPath
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		if err = filelock.Copy(assetsDir, dataAssets); err != nil {
+			logging.LogErrorf("copy assets from [%s] to [%s] failed: %s", assetsDir, dataAssets, err)
+			return nil, err
+		}
+		if removeErr := os.RemoveAll(assetsDir); removeErr != nil {
+			return nil, removeErr
+		}
+	}
+	return assetPathMap, nil
+}
+
+func writeImportedTree(boxID, syPath, newSyPath, relPath string, data []byte) error {
+	if IsEncryptedBox(boxID) {
+		HoldBoxReadLock(boxID)
+		defer ReleaseBoxReadLock(boxID)
+
+		dek, err := GetDEKIfUnlocked(boxID)
+		if err != nil {
+			return errors.New(Conf.Language(314))
+		}
+		data, err = EncryptFile(boxID, relPath, dek, data)
+		if err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(syPath, data, 0644); err != nil {
+		return err
+	}
+	return filelock.Rename(syPath, newSyPath)
+}
+
+func validateImportedNotebookIdentities(tmpDataPath string) ([]string, error) {
+	dirs, err := os.ReadDir(tmpDataPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var encryptedBoxIDs []string
+	for _, entry := range dirs {
+		if !entry.IsDir() || !ast.IsNodeIDPattern(entry.Name()) {
+			continue
+		}
+
+		boxID := entry.Name()
+		boxDir := filepath.Join(tmpDataPath, boxID)
+		confPath := filepath.Join(boxDir, ".siyuan", "conf.json")
+		backupPath := filepath.Join(boxDir, ".siyuan", notebookCryptoBackupFilename)
+
+		var boxConf *conf.BoxConf
+		if filelock.IsExist(confPath) {
+			data, readErr := filelock.ReadFile(confPath)
+			if readErr != nil {
+				return nil, fmt.Errorf("read imported notebook conf [%s] failed: %w", boxID, readErr)
+			}
+			boxConf = conf.NewBoxConf()
+			if unmarshalErr := gulu.JSON.UnmarshalJSON(data, boxConf); unmarshalErr != nil {
+				return nil, fmt.Errorf("parse imported notebook conf [%s] failed: %w", boxID, unmarshalErr)
+			}
+		}
+
+		var backup *conf.BoxEncryption
+		if filelock.IsExist(backupPath) {
+			backup, err = readBoxEncryptionFile(backupPath)
+			if err != nil {
+				return nil, fmt.Errorf("invalid imported notebook identity [%s]: %w", boxID, err)
+			}
+		}
+
+		var boxCrypt *conf.BoxEncryption
+		if boxConf != nil && boxConf.Encrypted {
+			if boxConf.BoxCrypt != nil && validateBoxEncryption(boxConf.BoxCrypt) == nil {
+				boxCrypt = boxConf.BoxCrypt
+			} else {
+				boxCrypt = backup
+			}
+			if boxCrypt == nil {
+				return nil, fmt.Errorf("encrypted notebook [%s] has no valid identity", boxID)
+			}
+		} else if boxConf != nil && backup != nil {
+			return nil, fmt.Errorf("notebook [%s] has conflicting normal and encrypted identities", boxID)
+		} else if backup != nil {
+			boxCrypt = backup
+		}
+
+		payloadFound, payloadErr := hasEncryptedNotebookPayloadAtPath(boxDir)
+		if payloadErr != nil {
+			return nil, fmt.Errorf("inspect imported notebook [%s] failed: %w", boxID, payloadErr)
+		}
+		if boxCrypt == nil && payloadFound {
+			return nil, fmt.Errorf("imported notebook [%s] contains encrypted payload without identity", boxID)
+		}
+		if boxCrypt == nil {
+			continue
+		}
+
+		if err = validateBoxEncryption(boxCrypt); err != nil {
+			return nil, fmt.Errorf("invalid imported notebook identity [%s]: %w", boxID, err)
+		}
+		if filelock.IsExist(filepath.Join(util.DataDir, boxID)) && IsEncryptedBox(boxID) {
+			return nil, fmt.Errorf("refuse to overwrite existing encrypted notebook [%s]", boxID)
+		}
+		encryptedBoxIDs = append(encryptedBoxIDs, boxID)
+	}
+	return encryptedBoxIDs, nil
 }
 
 func ImportData(zipPath string) (err error) {
@@ -557,18 +1137,19 @@ func ImportData(zipPath string) (err error) {
 	lockSync()
 	defer unlockSync()
 
+	logging.LogInfof("import data from [%s]", zipPath)
 	baseName := filepath.Base(zipPath)
 	ext := filepath.Ext(baseName)
 	baseName = strings.TrimSuffix(baseName, ext)
 	unzipPath := filepath.Join(filepath.Dir(zipPath), baseName)
 	err = gulu.Zip.Unzip(zipPath, unzipPath)
-	if nil != err {
+	if err != nil {
 		return
 	}
 	defer os.RemoveAll(unzipPath)
 
 	files, err := filepath.Glob(filepath.Join(unzipPath, "*/*.sy"))
-	if nil != err {
+	if err != nil {
 		logging.LogErrorf("check data.zip failed: %s", err)
 		return errors.New("check data.zip failed")
 	}
@@ -576,7 +1157,7 @@ func ImportData(zipPath string) (err error) {
 		return errors.New(Conf.Language(198))
 	}
 	dirs, err := os.ReadDir(unzipPath)
-	if nil != err {
+	if err != nil {
 		logging.LogErrorf("check data.zip failed: %s", err)
 		return errors.New("check data.zip failed")
 	}
@@ -585,18 +1166,63 @@ func ImportData(zipPath string) (err error) {
 	}
 
 	tmpDataPath := filepath.Join(unzipPath, dirs[0].Name())
-	if err = filelock.Copy(tmpDataPath, util.DataDir); nil != err {
+	tmpDataEmojisPath := filepath.Join(tmpDataPath, "emojis")
+	filelock.Walk(tmpDataEmojisPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d == nil {
+			return nil
+		}
+		if !util.IsValidUploadFileName(d.Name()) {
+			emojiFullName := path
+			fullPathFilteredName := filepath.Join(filepath.Dir(path), util.FilterUploadEmojiFileName(d.Name()))
+			// XSS through emoji name https://github.com/siyuan-note/siyuan/issues/15034
+			logging.LogWarnf("renaming invalid custom emoji file [%s] to [%s]", d.Name(), fullPathFilteredName)
+			if removeErr := filelock.Rename(emojiFullName, fullPathFilteredName); nil != removeErr {
+				logging.LogErrorf("renaming invalid custom emoji file to [%s] failed: %s", fullPathFilteredName, removeErr)
+			}
+		}
+		return nil
+	})
+	importedEncryptedBoxIDs, err := validateImportedNotebookIdentities(tmpDataPath)
+	if err != nil {
+		return err
+	}
+	if err = filelock.Copy(tmpDataPath, util.DataDir); err != nil {
 		logging.LogErrorf("copy data dir from [%s] to [%s] failed: %s", tmpDataPath, util.DataDir, err)
 		err = errors.New("copy data failed")
 		return
 	}
+	for _, boxID := range importedEncryptedBoxIDs {
+		forgetRuntimeNormalBox(boxID)
+	}
 
+	// 导入的 Data.zip 可能含加密笔记本备份文件：若本机未启用，自动把配置装回 conf.json，
+	// 让用户输主密码即可解锁导入的加密笔记本（不需主密码，仅装回 salt/verifier 配置）。
+	restoreNotebookCryptoConfigFromBackup()
+
+	logging.LogInfof("import data from [%s] done", zipPath)
 	IncSync()
-	FullReindex()
+	FullReindex(false)
 	return
 }
 
 func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
+	return importFromLocalPath(boxID, localPath, toPath, false)
+}
+
+// ImportFromLocalPathSkipRoot 导入本地路径，但不将来源根目录转换为文档。
+func ImportFromLocalPathSkipRoot(boxID, localPath string, toPath string) (err error) {
+	return importFromLocalPath(boxID, localPath, toPath, true)
+}
+
+func importFromLocalPath(boxID, localPath string, toPath string, skipRoot bool) (err error) {
+	box, err := getOpenedBox(boxID)
+	if nil != err {
+		return err
+	}
+	toPath = normalizeBoxDocTarget(boxID, toPath)
 	util.PushEndlessProgress(Conf.Language(73))
 	defer func() {
 		util.PushClearProgress()
@@ -612,9 +1238,9 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 	lockSync()
 	defer unlockSync()
 
-	WaitForWritingFiles()
+	FlushTxQueue()
 
-	var baseHPath, baseTargetPath, boxLocalPath string
+	var baseHPath, baseTargetPath string
 	if "/" == toPath {
 		baseHPath = "/"
 		baseTargetPath = "/"
@@ -627,53 +1253,78 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 		baseHPath = block.HPath
 		baseTargetPath = strings.TrimSuffix(block.Path, ".sy")
 	}
-	boxLocalPath = filepath.Join(util.DataDir, boxID)
+	targetDocDirLocalPath := filepath.Join(util.DataDir, boxID,
+		filepath.FromSlash(strings.TrimPrefix(baseTargetPath, "/")))
+	assetDirPath := GetImportAssetsDir(boxID, targetDocDirLocalPath)
+	if err = os.MkdirAll(assetDirPath, 0755); err != nil {
+		return
+	}
 
-	if gulu.File.IsDir(localPath) {
-		// 收集所有资源文件
-		assets := map[string]string{}
-		filelock.Walk(localPath, func(currentPath string, info os.FileInfo, walkErr error) error {
-			if localPath == currentPath {
+	hPathsIDs := map[string]string{}
+	idPaths := map[string]string{}
+	moveIDs := map[string]string{}
+	assetsDone := map[string]string{}
+	if gulu.File.IsDir(localPath) { // 导入文件夹
+		targetPaths := map[string]string{}
+		count := 0
+		// md 转换 sy
+		filelock.Walk(localPath, func(currentPath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d == nil {
 				return nil
 			}
-			if strings.HasPrefix(info.Name(), ".") {
-				if info.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") {
+				if d.IsDir() {
 					return filepath.SkipDir
 				}
 				return nil
 			}
 
-			if !strings.HasSuffix(info.Name(), ".md") && !strings.HasSuffix(info.Name(), ".markdown") {
-				assets[currentPath] = currentPath
-				return nil
-			}
-			return nil
-		})
-
-		targetPaths := map[string]string{}
-		assetsDone := map[string]string{}
-
-		// md 转换 sy
-		filelock.Walk(localPath, func(currentPath string, info os.FileInfo, walkErr error) error {
-			if strings.HasPrefix(info.Name(), ".") {
-				if info.IsDir() {
-					return filepath.SkipDir
+			if !d.IsDir() && (!strings.HasSuffix(currentPath, ".md") && !strings.HasSuffix(currentPath, ".markdown") ||
+				strings.Contains(filepath.ToSlash(currentPath), "/assets/")) {
+				// 非 Markdown 文件作为资源文件处理 https://github.com/siyuan-note/siyuan/issues/13817
+				existName := assetsDone[currentPath]
+				var name string
+				if "" == existName {
+					baseName := filepath.Base(currentPath)
+					baseName = util.FilterUploadFileName(baseName)
+					data, readErr := os.ReadFile(currentPath)
+					if readErr != nil {
+						logging.LogErrorf("read asset [%s] failed: %s", currentPath, readErr)
+						return nil
+					}
+					name, err = storeAssetForBox(boxID, assetDirPath, baseName, data)
+					if err != nil {
+						logging.LogErrorf("store asset [%s] for box [%s] failed: %s", currentPath, boxID, err)
+						return nil
+					}
+					assetsDone[currentPath] = name
 				}
 				return nil
 			}
 
 			var tree *parse.Tree
 			var ext string
-			title := info.Name()
-			if !info.IsDir() {
-				ext = path.Ext(info.Name())
-				title = strings.TrimSuffix(info.Name(), ext)
+			title := d.Name()
+			if !d.IsDir() {
+				ext = util.Ext(d.Name())
+				title = strings.TrimSuffix(d.Name(), ext)
 			}
 			id := ast.NewNodeID()
 
 			curRelPath := filepath.ToSlash(strings.TrimPrefix(currentPath, localPath))
+			if skipRoot && "" == curRelPath && d.IsDir() {
+				targetPaths["/"] = baseTargetPath
+				return nil
+			}
 			targetPath := path.Join(baseTargetPath, id)
-			hPath := path.Join(baseHPath, filepath.ToSlash(strings.TrimPrefix(currentPath, localPath)))
+			hPathRoot := filepath.Base(localPath)
+			if skipRoot {
+				hPathRoot = ""
+			}
+			hPath := path.Join(baseHPath, hPathRoot, filepath.ToSlash(strings.TrimPrefix(currentPath, localPath)))
 			hPath = strings.TrimSuffix(hPath, ext)
 			if "" == curRelPath {
 				curRelPath = "/"
@@ -685,15 +1336,36 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 
 			targetPath = strings.ReplaceAll(targetPath, ".sy/", "/")
 			targetPath += ".sy"
-			targetPaths[curRelPath] = targetPath
+			if _, ok := targetPaths[curRelPath]; !ok {
+				targetPaths[curRelPath] = targetPath
+			} else {
+				targetPath = targetPaths[curRelPath]
+				id = util.GetTreeID(targetPath)
+			}
 
-			if info.IsDir() {
+			if d.IsDir() {
+				if "assets" == d.Name() {
+					// 如果是 assets 文件夹则跳过，里面的 Markdown 文件算作资源文件 https://github.com/siyuan-note/siyuan/issues/13817
+					return nil
+				}
+
+				if subMdFiles := util.GetFilePathsByExts(currentPath, []string{".md", ".markdown"}); 1 > len(subMdFiles) {
+					// 如果该文件夹中不包含 Markdown 文件则不处理 https://github.com/siyuan-note/siyuan/issues/11567
+					return nil
+				}
+
+				// 如果当前文件夹路径下包含同名的 Markdown 文件，则不创建空文档 https://github.com/siyuan-note/siyuan/issues/13149
+				if gulu.File.IsExist(currentPath+".md") || gulu.File.IsExist(currentPath+".markdown") {
+					targetPaths[curRelPath+".md"] = targetPath
+					return nil
+				}
+
 				tree = treenode.NewTree(boxID, targetPath, hPath, title)
 				importTrees = append(importTrees, tree)
 				return nil
 			}
 
-			if !strings.HasSuffix(info.Name(), ".md") && !strings.HasSuffix(info.Name(), ".markdown") {
+			if !strings.HasSuffix(d.Name(), ".md") && !strings.HasSuffix(d.Name(), ".markdown") {
 				return nil
 			}
 
@@ -703,11 +1375,28 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 				return io.EOF
 			}
 
-			tree = parseStdMd(data)
+			tree, yfmRootID, yfmTitle, yfmUpdated := parseStdMd(data)
 			if nil == tree {
 				logging.LogErrorf("parse tree [%s] failed", currentPath)
 				return nil
 			}
+
+			if "" != yfmRootID {
+				moveIDs[id] = yfmRootID
+				id = yfmRootID
+			}
+			if "" != yfmTitle {
+				title = yfmTitle
+			}
+			unescapedTitle, unescapeErr := url.PathUnescape(title)
+			if nil == unescapeErr {
+				title = unescapedTitle
+			}
+			hPath = path.Join(path.Dir(hPath), title)
+			updated := yfmUpdated
+			fname := path.Base(targetPath)
+			targetPath = strings.ReplaceAll(targetPath, fname, id+".sy")
+			targetPaths[curRelPath] = targetPath
 
 			tree.ID = id
 			tree.Root.ID = id
@@ -718,10 +1407,8 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 			tree.Path = targetPath
 			targetPaths[curRelPath] = targetPath
 			tree.HPath = hPath
-			tree.Root.Spec = "1"
+			tree.Root.Spec = treenode.CurrentSpec
 
-			docDirLocalPath := filepath.Dir(filepath.Join(boxLocalPath, targetPath))
-			assetDirPath := getAssetsDir(boxLocalPath, docDirLocalPath)
 			currentDir := filepath.Dir(currentPath)
 			ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
 				if !entering || (ast.NodeLinkDest != n.Type && !n.IsTextMarkType("a")) {
@@ -736,12 +1423,19 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 				}
 
 				if strings.HasPrefix(dest, "data:image") && strings.Contains(dest, ";base64,") {
-					processBase64Img(n, dest, assetDirPath, err)
+					processBase64Img(n, dest, assetDirPath, boxID)
 					return ast.WalkContinue
 				}
 
-				dest = strings.ReplaceAll(dest, "%20", " ")
-				dest = strings.ReplaceAll(dest, "%5C", "/")
+				decodedDest := string(html.DecodeDestination([]byte(dest)))
+				if decodedDest != dest {
+					dest = decodedDest
+				}
+				absolutePath := filepath.Join(currentDir, dest)
+				if !gulu.File.IsSubPath(currentDir, absolutePath) {
+					return ast.WalkContinue
+				}
+
 				if ast.NodeLinkDest == n.Type {
 					n.Tokens = []byte(dest)
 				} else {
@@ -755,38 +1449,62 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 					return ast.WalkContinue
 				}
 
-				absDest := filepath.Join(currentDir, dest)
-				fullPath, exist := assets[absDest]
-				if !exist {
-					absDest = filepath.Join(currentDir, string(html.DecodeDestination([]byte(dest))))
+				if !gulu.File.IsExist(absolutePath) {
+					return ast.WalkContinue
 				}
-				fullPath, exist = assets[absDest]
-				if exist {
-					existName := assetsDone[absDest]
-					var name string
-					if "" == existName {
-						name = filepath.Base(fullPath)
-						name = util.AssetName(name)
-						assetTargetPath := filepath.Join(assetDirPath, name)
-						if err = filelock.Copy(fullPath, assetTargetPath); nil != err {
-							logging.LogErrorf("copy asset from [%s] to [%s] failed: %s", fullPath, assetTargetPath, err)
-							return ast.WalkContinue
-						}
-						assetsDone[absDest] = name
-					} else {
-						name = existName
+
+				if strings.HasSuffix(absolutePath, ".md") || strings.HasSuffix(absolutePath, ".markdown") {
+					if !strings.Contains(filepath.ToSlash(absolutePath), "/assets/") {
+						// 链接 .md 文件的情况下只有路径中包含 assets 才算作资源文件，其他情况算作文档链接，后续在 convertMdHyperlinks2WikiLinks 中处理
+						// Supports converting relative path hyperlinks into document block references after importing Markdown https://github.com/siyuan-note/siyuan/issues/13817
+						return ast.WalkContinue
 					}
-					if ast.NodeLinkDest == n.Type {
-						n.Tokens = []byte("assets/" + name)
-					} else {
-						n.TextMarkAHref = "assets/" + name
+				}
+
+				existName := assetsDone[absolutePath]
+				var name string
+				if "" == existName {
+					baseName := filepath.Base(absolutePath)
+					data, readErr := filelock.ReadFile(absolutePath)
+					if readErr != nil {
+						logging.LogErrorf("read asset [%s] failed: %s", absolutePath, readErr)
+						return ast.WalkContinue
 					}
+					name, err = storeAssetForBox(boxID, assetDirPath, util.FilterUploadFileName(baseName), data)
+					if err != nil {
+						logging.LogErrorf("store asset [%s] for box [%s] failed: %s", absolutePath, boxID, err)
+						return ast.WalkContinue
+					}
+					assetsDone[absolutePath] = name
+				} else {
+					name = existName
+				}
+				if ast.NodeLinkDest == n.Type {
+					assetURL := "assets/" + name
+					if IsEncryptedBox(boxID) {
+						assetURL += "?box=" + boxID
+					}
+					n.Tokens = []byte(assetURL)
+				} else {
+					assetURL := "assets/" + name
+					if IsEncryptedBox(boxID) {
+						assetURL += "?box=" + boxID
+					}
+					n.TextMarkAHref = assetURL
 				}
 				return ast.WalkContinue
 			})
 
-			reassignIDUpdated(tree)
+			reassignIDUpdated(tree, id, updated)
 			importTrees = append(importTrees, tree)
+
+			hPathsIDs[tree.HPath] = tree.ID
+			idPaths[tree.ID] = tree.Path
+
+			count++
+			if 0 == count%4 {
+				util.PushEndlessProgress(fmt.Sprintf(Conf.language(70), fmt.Sprintf("%s", tree.HPath)))
+			}
 			return nil
 		})
 	} else { // 导入单个文件
@@ -802,15 +1520,29 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 		targetPath = path.Join(targetPath, id+".sy")
 		var data []byte
 		data, err = os.ReadFile(localPath)
-		if nil != err {
+		if err != nil {
 			return err
 		}
-		tree := parseStdMd(data)
+		tree, yfmRootID, yfmTitle, yfmUpdated := parseStdMd(data)
 		if nil == tree {
 			msg := fmt.Sprintf("parse tree [%s] failed", localPath)
-			logging.LogErrorf(msg)
+			logging.LogError(msg)
 			return errors.New(msg)
 		}
+
+		if "" != yfmRootID {
+			id = yfmRootID
+		}
+		if "" != yfmTitle {
+			title = yfmTitle
+		}
+		unescapedTitle, unescapeErr := url.PathUnescape(title)
+		if nil == unescapeErr {
+			title = unescapedTitle
+		}
+		updated := yfmUpdated
+		fname := path.Base(targetPath)
+		targetPath = strings.ReplaceAll(targetPath, fname, id+".sy")
 
 		tree.ID = id
 		tree.Root.ID = id
@@ -819,10 +1551,9 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 		tree.Box = boxID
 		tree.Path = targetPath
 		tree.HPath = path.Join(baseHPath, title)
-		tree.Root.Spec = "1"
+		tree.Root.Spec = treenode.CurrentSpec
 
-		docDirLocalPath := filepath.Dir(filepath.Join(boxLocalPath, targetPath))
-		assetDirPath := getAssetsDir(boxLocalPath, docDirLocalPath)
+		localPathParentDir := filepath.Dir(localPath)
 		ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
 			if !entering || (ast.NodeLinkDest != n.Type && !n.IsTextMarkType("a")) {
 				return ast.WalkContinue
@@ -836,12 +1567,19 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 			}
 
 			if strings.HasPrefix(dest, "data:image") && strings.Contains(dest, ";base64,") {
-				processBase64Img(n, dest, assetDirPath, err)
+				processBase64Img(n, dest, assetDirPath, boxID)
 				return ast.WalkContinue
 			}
 
-			dest = strings.ReplaceAll(dest, "%20", " ")
-			dest = strings.ReplaceAll(dest, "%5C", "/")
+			decodedDest := string(html.DecodeDestination([]byte(dest)))
+			if decodedDest != dest {
+				dest = decodedDest
+			}
+			absolutePath := filepath.Join(localPathParentDir, dest)
+			if !gulu.File.IsSubPath(localPathParentDir, absolutePath) {
+				return ast.WalkContinue
+			}
+
 			if ast.NodeLinkDest == n.Type {
 				n.Tokens = []byte(dest)
 			} else {
@@ -855,74 +1593,196 @@ func ImportFromLocalPath(boxID, localPath string, toPath string) (err error) {
 				return ast.WalkContinue
 			}
 
-			absolutePath := filepath.Join(filepath.Dir(localPath), dest)
-			exist := gulu.File.IsExist(absolutePath)
-			if !exist {
-				absolutePath = filepath.Join(filepath.Dir(localPath), string(html.DecodeDestination([]byte(dest))))
-				exist = gulu.File.IsExist(absolutePath)
+			if !gulu.File.IsExist(absolutePath) {
+				return ast.WalkContinue
 			}
-			if exist {
-				name := filepath.Base(absolutePath)
-				name = util.AssetName(name)
-				assetTargetPath := filepath.Join(assetDirPath, name)
-				if err = filelock.Copy(absolutePath, assetTargetPath); nil != err {
-					logging.LogErrorf("copy asset from [%s] to [%s] failed: %s", absolutePath, assetTargetPath, err)
+
+			existName := assetsDone[absolutePath]
+			var name string
+			if "" == existName {
+				baseName := filepath.Base(absolutePath)
+				data, readErr := filelock.ReadFile(absolutePath)
+				if readErr != nil {
+					logging.LogErrorf("read asset [%s] failed: %s", absolutePath, readErr)
 					return ast.WalkContinue
 				}
-				if ast.NodeLinkDest == n.Type {
-					n.Tokens = []byte("assets/" + name)
-				} else {
-					n.TextMarkAHref = "assets/" + name
+				name, err = storeAssetForBox(boxID, assetDirPath, util.FilterUploadFileName(baseName), data)
+				if err != nil {
+					logging.LogErrorf("store asset [%s] for box [%s] failed: %s", absolutePath, boxID, err)
+					return ast.WalkContinue
 				}
+				assetsDone[absolutePath] = name
+			} else {
+				name = existName
+			}
+			if ast.NodeLinkDest == n.Type {
+				assetURL := "assets/" + name
+				if IsEncryptedBox(boxID) {
+					assetURL += "?box=" + boxID
+				}
+				n.Tokens = []byte(assetURL)
+			} else {
+				assetURL := "assets/" + name
+				if IsEncryptedBox(boxID) {
+					assetURL += "?box=" + boxID
+				}
+				n.TextMarkAHref = assetURL
 			}
 			return ast.WalkContinue
 		})
 
-		reassignIDUpdated(tree)
+		reassignIDUpdated(tree, id, updated)
+		// 兜底校验：禁止跨加密边界块引（导入的 Markdown 可能含跨边界引用）
+		degradeCrossBoundaryBlockRefs(tree.Root, tree.Box)
 		importTrees = append(importTrees, tree)
 	}
 
 	if 0 < len(importTrees) {
+		for id, newID := range moveIDs {
+			for _, importTree := range importTrees {
+				importTree.ID = strings.ReplaceAll(importTree.ID, id, newID)
+				importTree.Path = strings.ReplaceAll(importTree.Path, id, newID)
+			}
+		}
+
 		initSearchLinks()
+		convertMdHyperlinks2WikiLinks()
 		convertWikiLinksAndTags()
-		buildBlockRefInText()
+		mergeTextAndHandlerNestedInlines()
 
 		for i, tree := range importTrees {
-			indexWriteJSONQueue(tree)
+			indexWriteTreeIndexQueue(tree)
 			if 0 == i%4 {
 				util.PushEndlessProgress(fmt.Sprintf(Conf.Language(66), fmt.Sprintf("%d/%d ", i, len(importTrees))+tree.HPath))
 			}
 		}
+		refreshBoxDocInfoByBoxID(boxID)
+		util.PushClearProgress()
 
 		importTrees = []*parse.Tree{}
 		searchLinks = map[string]string{}
+
+		// 按照路径排序 Improve sort when importing markdown files https://github.com/siyuan-note/siyuan/issues/11390
+		var hPaths []string
+		for hPath := range hPathsIDs {
+			hPaths = append(hPaths, hPath)
+		}
+		sort.Strings(hPaths)
+		paths := map[string][]string{}
+		for _, hPath := range hPaths {
+			p := idPaths[hPathsIDs[hPath]]
+			parent := path.Dir(p)
+			for {
+				if baseTargetPath == parent {
+					break
+				}
+
+				if ps, ok := paths[parent]; !ok {
+					paths[parent] = []string{p}
+				} else {
+					ps = append(ps, p)
+					ps = gulu.Str.RemoveDuplicatedElem(ps)
+					paths[parent] = ps
+				}
+				p = parent
+				parent = path.Dir(parent)
+			}
+		}
+
+		sortIDVals := map[string]int{}
+		for _, ps := range paths {
+			sortVal := 0
+			for _, p := range ps {
+				sortIDVals[util.GetTreeID(p)] = sortVal
+				sortVal++
+			}
+		}
+		box.setSort(sortIDVals)
 	}
 
 	IncSync()
-	util.ReloadUI()
 	debug.FreeOSMemory()
 	return
 }
 
-func parseStdMd(markdown []byte) (ret *parse.Tree) {
+func parseStdMd(markdown []byte) (ret *parse.Tree, yfmRootID, yfmTitle, yfmUpdated string) {
 	luteEngine := util.NewStdLute()
+	luteEngine.SetYamlFrontMatter(true) // 解析 YAML Front Matter https://github.com/siyuan-note/siyuan/issues/10878
 	ret = parse.Parse("", markdown, luteEngine.ParseOptions)
 	if nil == ret {
 		return
 	}
-	genTreeID(ret)
-	imgHtmlBlock2InlineImg(ret)
+	yfmRootID, yfmTitle, yfmUpdated = normalizeTree(ret)
+	htmlBlock2Media(ret)
+	htmlBlock2Inline(ret)
+	parse.TextMarks2Inlines(ret) // 先将 TextMark 转换为 Inlines https://github.com/siyuan-note/siyuan/issues/13056
 	parse.NestedInlines2FlattedSpansHybrid(ret, false)
 	return
 }
 
-func processBase64Img(n *ast.Node, dest string, assetDirPath string, err error) {
-	base64TmpDir := filepath.Join(util.TempDir, "base64")
-	os.MkdirAll(base64TmpDir, 0755)
+// htmlBlock2Media 将导入标准 Markdown 时被识别为 HTML 块的 <audio>/<video> 还原为音频/视频块。
+// 导入 Markdown 使用的是 NewStdLute，未启用 ProtyleWYSIWYG，故 lute 不会把 <audio>/<video> 解析为
+// NodeAudio/NodeVideo，而是兜底为 NodeHTMLBlock，这里在解析后做一次修正。
+// Improve Markdown import to parse audio/video tags https://github.com/siyuan-note/siyuan/issues/17985
+func htmlBlock2Media(tree *parse.Tree) {
+	ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
+		if !entering || ast.NodeHTMLBlock != n.Type {
+			return ast.WalkContinue
+		}
 
+		tokens := bytes.TrimSpace(n.Tokens)
+		tokens, _ = bytes.CutPrefix(tokens, []byte("<div>"))
+		tokens, _ = bytes.CutSuffix(tokens, []byte("</div>"))
+		tokens = bytes.TrimSpace(tokens)
+
+		lower := bytes.ToLower(tokens)
+		if bytes.HasPrefix(lower, []byte("<audio")) && bytes.HasSuffix(tokens, []byte(">")) {
+			n.Type = ast.NodeAudio
+			n.Tokens = tokens
+		} else if bytes.HasPrefix(lower, []byte("<video")) && bytes.HasSuffix(tokens, []byte(">")) {
+			n.Type = ast.NodeVideo
+			n.Tokens = tokens
+		}
+		return ast.WalkContinue
+	})
+}
+
+func processHTMLBlockSvgImg(n *ast.Node, assetDirPath, boxID string) {
+	re := regexp.MustCompile(`(?i)<svg[^>]*>(.*?)</svg>`)
+	matches := re.FindStringSubmatch(string(n.Tokens))
+	if 1 >= len(matches) {
+		return
+	}
+
+	svgContent := matches[0]
+	name, err := storeAssetForBox(boxID, assetDirPath, "image.svg", []byte(svgContent))
+	if err != nil {
+		logging.LogErrorf("store svg asset for box [%s] failed: %s", boxID, err)
+		return
+	}
+
+	assetURL := "assets/" + name
+	if boxID != "" && IsEncryptedBox(boxID) {
+		assetURL += "?box=" + boxID
+	}
+	n.Type = ast.NodeParagraph
+	img := &ast.Node{Type: ast.NodeImage}
+	img.AppendChild(&ast.Node{Type: ast.NodeBang})
+	img.AppendChild(&ast.Node{Type: ast.NodeOpenBracket})
+	img.AppendChild(&ast.Node{Type: ast.NodeLinkText, Tokens: []byte("image")})
+	img.AppendChild(&ast.Node{Type: ast.NodeCloseBracket})
+	img.AppendChild(&ast.Node{Type: ast.NodeOpenParen})
+	img.AppendChild(&ast.Node{Type: ast.NodeLinkDest, Tokens: []byte(assetURL)})
+	img.AppendChild(&ast.Node{Type: ast.NodeCloseParen})
+	n.AppendChild(img)
+}
+func processBase64Img(n *ast.Node, dest string, assetDirPath, boxID string) {
 	sep := strings.Index(dest, ";base64,")
+	str := strings.TrimSpace(dest[sep+8:])
+	re := regexp.MustCompile(`(?i)%0A`)
+	str = re.ReplaceAllString(str, "\n")
 	var decodeErr error
-	unbased, decodeErr := base64.StdEncoding.DecodeString(dest[sep+8:])
+	unbased, decodeErr := base64.StdEncoding.DecodeString(str)
 	if nil != decodeErr {
 		logging.LogErrorf("decode base64 image failed: %s", decodeErr)
 		return
@@ -935,9 +1795,16 @@ func processBase64Img(n *ast.Node, dest string, assetDirPath string, err error) 
 	case "image/png":
 		img, decodeErr = png.Decode(dataReader)
 		ext = ".png"
+		if nil != decodeErr {
+			dataReader.Seek(0, 0)
+			img, decodeErr = jpeg.Decode(dataReader)
+			ext = ".jpg"
+		}
 	case "image/jpeg":
 		img, decodeErr = jpeg.Decode(dataReader)
 		ext = ".jpg"
+	case "image/svg+xml":
+		ext = ".svg"
 	default:
 		logging.LogWarnf("unsupported base64 image type [%s]", typ)
 		return
@@ -952,47 +1819,91 @@ func processBase64Img(n *ast.Node, dest string, assetDirPath string, err error) 
 	if nil != alt {
 		name = alt.TokensStr() + ext
 	}
-	name = util.FilterFileName(name)
-	name = util.AssetName(name)
+	name = util.FilterUploadFileName(name)
 
-	tmp := filepath.Join(base64TmpDir, name)
-	tmpFile, openErr := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE, 0644)
-	if nil != openErr {
-		logging.LogErrorf("open temp file [%s] failed: %s", tmp, openErr)
-		return
-	}
-
-	var encodeErr error
+	var data []byte
 	switch typ {
-	case "image/png":
-		encodeErr = png.Encode(tmpFile, img)
-	case "image/jpeg":
-		encodeErr = jpeg.Encode(tmpFile, img, &jpeg.Options{Quality: 100})
+	case "image/svg+xml":
+		data = unbased
+	default:
+		var buf bytes.Buffer
+		switch typ {
+		case "image/png":
+			encodeErr := png.Encode(&buf, img)
+			if nil != encodeErr {
+				logging.LogErrorf("encode png image failed: %s", encodeErr)
+				return
+			}
+		case "image/jpeg":
+			encodeErr := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 100})
+			if nil != encodeErr {
+				logging.LogErrorf("encode jpeg image failed: %s", encodeErr)
+				return
+			}
+		}
+		data = buf.Bytes()
 	}
-	if nil != encodeErr {
-		logging.LogErrorf("encode base64 image failed: %s", encodeErr)
-		tmpFile.Close()
-		return
-	}
-	tmpFile.Close()
 
-	assetTargetPath := filepath.Join(assetDirPath, name)
-	if err = filelock.Copy(tmp, assetTargetPath); nil != err {
-		logging.LogErrorf("copy asset from [%s] to [%s] failed: %s", tmp, assetTargetPath, err)
+	diskName, err := storeAssetForBox(boxID, assetDirPath, name, data)
+	if err != nil {
+		logging.LogErrorf("store base64 image for box [%s] failed: %s", boxID, err)
 		return
 	}
-	n.Tokens = []byte("assets/" + name)
+	assetURL := "assets/" + diskName
+	if boxID != "" && IsEncryptedBox(boxID) {
+		assetURL += "?box=" + boxID
+	}
+	n.Tokens = []byte(assetURL)
 }
 
-func imgHtmlBlock2InlineImg(tree *parse.Tree) {
+// encryptBoxAVFiles 把临时目录中的 AV 定义文件加密写入加密笔记本级目录。
+// 写入后通过 SetAVBoxID 建立 AV 归属映射，确保后续 mirror/relation 操作正确路由。
+func encryptBoxAVFiles(boxID, storageAvDir string) error {
+	if !IsEncryptedBox(boxID) || !gulu.File.IsExist(storageAvDir) {
+		return nil
+	}
+	boxAVDir := filepath.Join(util.DataDir, boxID, "storage", "av")
+	if err := os.MkdirAll(boxAVDir, 0755); err != nil {
+		return err
+	}
+	return filelock.Walk(storageAvDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d == nil || d.IsDir() {
+			return walkErr
+		}
+		if !strings.HasSuffix(d.Name(), ".json") {
+			return nil
+		}
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		avID := strings.TrimSuffix(d.Name(), ".json")
+		// 加密写入前建立 box 映射，mirror/relation 操作即可正确路由
+		av.SetAVBoxID(avID, boxID)
+		enc, encErr := av.EncryptAVData(boxID, avID, src)
+		if encErr != nil {
+			return encErr
+		}
+		return os.WriteFile(filepath.Join(boxAVDir, d.Name()), enc, 0644)
+	})
+}
+
+func htmlBlock2Inline(tree *parse.Tree) {
 	imgHtmlBlocks := map[*ast.Node]*html.Node{}
+	aHtmlBlocks := map[*ast.Node]*html.Node{}
+	var unlinks []*ast.Node
 	ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
 		if !entering {
 			return ast.WalkContinue
 		}
 
-		if ast.NodeHTMLBlock == n.Type {
-			htmlNodes, pErr := html.ParseFragment(bytes.NewReader(n.Tokens), &html.Node{Type: html.ElementNode})
+		if ast.NodeHTMLBlock == n.Type || (ast.NodeText == n.Type && bytes.HasPrefix(bytes.ToLower(n.Tokens), []byte("<img "))) {
+			tokens := bytes.TrimSpace(n.Tokens)
+			tokens, _ = bytes.CutPrefix(tokens, []byte("<div>"))
+			tokens, _ = bytes.CutSuffix(tokens, []byte("</div>"))
+			tokens = bytes.TrimSpace(tokens)
+
+			htmlNodes, pErr := html.ParseFragment(bytes.NewReader(tokens), &html.Node{Type: html.ElementNode})
 			if nil != pErr {
 				logging.LogErrorf("parse html block [%s] failed: %s", n.Tokens, pErr)
 				return ast.WalkContinue
@@ -1008,6 +1919,37 @@ func imgHtmlBlock2InlineImg(tree *parse.Tree) {
 				}
 			}
 		}
+		if ast.NodeHTMLBlock == n.Type || (ast.NodeText == n.Type && bytes.HasPrefix(bytes.ToLower(n.Tokens), []byte("<a "))) {
+			tokens := bytes.TrimSpace(n.Tokens)
+			tokens, _ = bytes.CutPrefix(tokens, []byte("<div>"))
+			tokens, _ = bytes.CutSuffix(tokens, []byte("</div>"))
+			tokens = bytes.TrimSpace(tokens)
+
+			if ast.NodeHTMLBlock != n.Type && nil != n.Next && nil != n.Next.Next {
+				if ast.NodeText == n.Next.Next.Type && bytes.Equal(n.Next.Next.Tokens, []byte("</a>")) {
+					tokens = append(tokens, n.Next.Tokens...)
+					tokens = append(tokens, []byte("</a>")...)
+					unlinks = append(unlinks, n.Next)
+					unlinks = append(unlinks, n.Next.Next)
+				}
+			}
+
+			htmlNodes, pErr := html.ParseFragment(bytes.NewReader(tokens), &html.Node{Type: html.ElementNode})
+			if nil != pErr {
+				logging.LogErrorf("parse html block [%s] failed: %s", n.Tokens, pErr)
+				return ast.WalkContinue
+			}
+			if 1 > len(htmlNodes) {
+				return ast.WalkContinue
+			}
+
+			for _, htmlNode := range htmlNodes {
+				if atom.A == htmlNode.DataAtom {
+					aHtmlBlocks[n] = htmlNode
+					break
+				}
+			}
+		}
 		return ast.WalkContinue
 	})
 
@@ -1016,7 +1958,7 @@ func imgHtmlBlock2InlineImg(tree *parse.Tree) {
 		alt := domAttrValue(htmlImg, "alt")
 		title := domAttrValue(htmlImg, "title")
 
-		p := &ast.Node{Type: ast.NodeParagraph, ID: n.ID}
+		p := treenode.NewParagraph(n.ID)
 		img := &ast.Node{Type: ast.NodeImage}
 		p.AppendChild(img)
 		img.AppendChild(&ast.Node{Type: ast.NodeBang})
@@ -1030,59 +1972,106 @@ func imgHtmlBlock2InlineImg(tree *parse.Tree) {
 			img.AppendChild(&ast.Node{Type: ast.NodeLinkTitle})
 		}
 		img.AppendChild(&ast.Node{Type: ast.NodeCloseParen})
+		if width := domAttrValue(htmlImg, "width"); "" != width {
+			if util2.IsDigit(width) {
+				width += "px"
+			}
+			style := "width: " + width + ";"
+			ial := &ast.Node{Type: ast.NodeKramdownSpanIAL, Tokens: parse.IAL2Tokens([][]string{{"style", style}})}
+			img.SetIALAttr("style", style)
+			img.InsertAfter(ial)
+		} else if height := domAttrValue(htmlImg, "height"); "" != height {
+			if util2.IsDigit(height) {
+				height += "px"
+			}
+			style := "height: " + height + ";"
+			ial := &ast.Node{Type: ast.NodeKramdownSpanIAL, Tokens: parse.IAL2Tokens([][]string{{"style", style}})}
+			img.SetIALAttr("style", style)
+			img.InsertAfter(ial)
+		}
 
-		n.InsertBefore(p)
+		if ast.NodeHTMLBlock == n.Type {
+			n.InsertBefore(p)
+		} else if ast.NodeText == n.Type {
+			if nil != n.Parent {
+				if n.Parent.IsContainerBlock() {
+					n.InsertBefore(p)
+				} else {
+					n.InsertBefore(img)
+				}
+			} else {
+				n.InsertBefore(p)
+			}
+		}
+		unlinks = append(unlinks, n)
+	}
+
+	for n, htmlA := range aHtmlBlocks {
+		href := domAttrValue(htmlA, "href")
+		title := domAttrValue(htmlA, "title")
+		anchor := strings.TrimSpace(util2.DomText(htmlA))
+
+		if "" == anchor {
+			unlinks = append(unlinks, n)
+			if nil != n.Next && ast.NodeText == n.Next.Type && "</a>" == n.NextNodeText() {
+				unlinks = append(unlinks, n.Next)
+			}
+			continue
+		}
+
+		p := treenode.NewParagraph(n.ID)
+		a := &ast.Node{Type: ast.NodeLink}
+		p.AppendChild(a)
+		a.AppendChild(&ast.Node{Type: ast.NodeOpenBracket})
+		a.AppendChild(&ast.Node{Type: ast.NodeLinkText, Tokens: []byte(anchor)})
+		a.AppendChild(&ast.Node{Type: ast.NodeCloseBracket})
+		a.AppendChild(&ast.Node{Type: ast.NodeOpenParen})
+		a.AppendChild(&ast.Node{Type: ast.NodeLinkDest, Tokens: []byte(href)})
+		if "" != title {
+			a.AppendChild(&ast.Node{Type: ast.NodeLinkSpace})
+			a.AppendChild(&ast.Node{Type: ast.NodeLinkTitle, Tokens: []byte(title)})
+		}
+		a.AppendChild(&ast.Node{Type: ast.NodeCloseParen})
+
+		if ast.NodeHTMLBlock == n.Type || (nil == n.Previous && (nil != n.Next && nil != n.Next.Next && nil == n.Next.Next.Next)) {
+			n.InsertBefore(p)
+		} else {
+			n.InsertBefore(a)
+		}
+		unlinks = append(unlinks, n)
+	}
+
+	for _, n := range unlinks {
 		n.Unlink()
 	}
-	return
 }
 
-func reassignIDUpdated(tree *parse.Tree) {
-	var blockCount int
+func reassignIDUpdated(tree *parse.Tree, rootID, updated string) {
 	ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
 		if !entering || "" == n.ID {
 			return ast.WalkContinue
 		}
 
-		blockCount++
-		return ast.WalkContinue
-	})
-
-	ids := make([]string, blockCount)
-	min, _ := strconv.ParseInt(time.Now().Add(-1*time.Duration(blockCount)*time.Second).Format("20060102150405"), 10, 64)
-	for i := 0; i < blockCount; i++ {
-		ids[i] = newID(fmt.Sprintf("%d", min))
-		min++
-	}
-
-	var i int
-	ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
-		if !entering || "" == n.ID {
-			return ast.WalkContinue
+		n.ID = ast.NewNodeID()
+		if ast.NodeDocument == n.Type && "" != rootID {
+			n.ID = rootID
 		}
 
-		n.ID = ids[i]
 		n.SetIALAttr("id", n.ID)
-		n.SetIALAttr("updated", util.TimeFromID(n.ID))
-		i++
+		if "" != updated {
+			n.SetIALAttr("updated", updated)
+			if "" == rootID {
+				n.ID = updated + "-" + gulu.Rand.String(7)
+				n.SetIALAttr("id", n.ID)
+			}
+		} else {
+			n.SetIALAttr("updated", util.TimeFromID(n.ID))
+		}
 		return ast.WalkContinue
 	})
 	tree.ID = tree.Root.ID
 	tree.Path = path.Join(path.Dir(tree.Path), tree.ID+".sy")
 	tree.Root.SetIALAttr("id", tree.Root.ID)
-}
-
-func newID(t string) string {
-	return t + "-" + randStr(7)
-}
-
-func randStr(length int) string {
-	letter := []rune("abcdefghijklmnopqrstuvwxyz0123456789")
-	b := make([]rune, length)
-	for i := range b {
-		b[i] = letter[rand.Intn(len(letter))]
-	}
-	return string(b)
 }
 
 func domAttrValue(n *html.Node, attrName string) string {
@@ -1116,6 +2105,56 @@ func initSearchLinks() {
 			searchLinks[nodePath] = n.ID
 			return ast.WalkContinue
 		})
+	}
+}
+
+func convertMdHyperlinks2WikiLinks() {
+	// Supports converting relative path hyperlinks into document block references after importing Markdown https://github.com/siyuan-note/siyuan/issues/13817
+
+	var unlinks []*ast.Node
+	for _, tree := range importTrees {
+		ast.Walk(tree.Root, func(n *ast.Node, entering bool) ast.WalkStatus {
+			if !entering || ast.NodeTextMark != n.Type {
+				return ast.WalkContinue
+			}
+
+			if "a" != n.TextMarkType {
+				return ast.WalkContinue
+			}
+
+			linkText := n.TextMarkTextContent
+			if "" == linkText {
+				return ast.WalkContinue
+			}
+			linkDest := n.TextMarkAHref
+			if "" == linkDest {
+				return ast.WalkContinue
+			}
+			if strings.HasPrefix(linkDest, "assets/") {
+				return ast.WalkContinue
+			}
+			if !strings.HasSuffix(linkDest, ".md") && !strings.HasSuffix(linkDest, ".markdown") {
+				return ast.WalkContinue
+			}
+			linkDest = strings.TrimSuffix(linkDest, ".md")
+			linkDest = strings.TrimSuffix(linkDest, ".markdown")
+
+			buf := bytes.Buffer{}
+			buf.WriteString("[[")
+			buf.WriteString(linkDest)
+			buf.WriteString("|")
+			buf.WriteString(linkText)
+			buf.WriteString("]]")
+
+			wikilinkNode := &ast.Node{Type: ast.NodeText, Tokens: buf.Bytes()}
+			n.InsertBefore(wikilinkNode)
+			unlinks = append(unlinks, n)
+			return ast.WalkContinue
+		})
+	}
+
+	for _, n := range unlinks {
+		n.Unlink()
 	}
 }
 
@@ -1187,6 +2226,10 @@ func convertWikiLinksAndTags0(tree *parse.Tree) {
 }
 
 func convertTags(text string) (ret string) {
+	if !util.MarkdownSettings.InlineTag {
+		return text
+	}
+
 	pos, i := -1, 0
 	tokens := []byte(text)
 	for ; i < len(tokens); i++ {
@@ -1213,10 +2256,24 @@ func convertTags(text string) (ret string) {
 	return string(tokens)
 }
 
-// buildBlockRefInText 将文本节点进行结构化处理。
-func buildBlockRefInText() {
-	lute := NewLute()
-	lute.SetHTMLTag2TextMark(true)
+func searchLinkID(link string) (id string) {
+	id = searchLinks[link]
+	if "" != id {
+		return
+	}
+
+	baseName := path.Base(link)
+	for searchLink, searchID := range searchLinks {
+		if path.Base(searchLink) == baseName {
+			return searchID
+		}
+	}
+	return
+}
+
+func mergeTextAndHandlerNestedInlines() {
+	luteEngine := NewLute()
+	luteEngine.SetHTMLTag2TextMark(true)
 	for _, tree := range importTrees {
 		tree.MergeText()
 
@@ -1230,7 +2287,7 @@ func buildBlockRefInText() {
 				return ast.WalkContinue
 			}
 
-			t := parse.Inline("", n.Tokens, lute.ParseOptions) // 使用行级解析
+			t := parse.Inline("", n.Tokens, luteEngine.ParseOptions) // 使用行级解析
 			parse.NestedInlines2FlattedSpans(t, false)
 			var children []*ast.Node
 			for c := t.Root.FirstChild.FirstChild; nil != c; c = c.Next {
@@ -1247,19 +2304,4 @@ func buildBlockRefInText() {
 			node.Unlink()
 		}
 	}
-}
-
-func searchLinkID(link string) (id string) {
-	id = searchLinks[link]
-	if "" != id {
-		return
-	}
-
-	baseName := path.Base(link)
-	for searchLink, searchID := range searchLinks {
-		if path.Base(searchLink) == baseName {
-			return searchID
-		}
-	}
-	return
 }

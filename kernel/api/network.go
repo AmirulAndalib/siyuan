@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -20,9 +20,9 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -31,6 +31,7 @@ import (
 
 	"github.com/88250/gulu"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/util"
@@ -54,14 +55,11 @@ func echo(c *gin.Context) {
 
 	var (
 		password      string
-		passwordSet   bool
 		multipartForm *MultipartForm
 		rawData       any
 	)
 
-	password, passwordSet = c.Request.URL.User.Password()
-
-	if form, err := c.MultipartForm(); nil != err || nil == form {
+	if form, err := c.MultipartForm(); err != nil || nil == form {
 		multipartForm = nil
 	} else {
 		multipartForm = &MultipartForm{
@@ -75,31 +73,31 @@ func echo(c *gin.Context) {
 				files[i].Filename = handler.Filename
 				files[i].Header = handler.Header
 				files[i].Size = handler.Size
-				if file, err := handler.Open(); nil != err {
+				if file, err := handler.Open(); err != nil {
 					logging.LogWarnf("echo open form [%s] file [%s] error: %s", k, handler.Filename, err.Error())
 				} else {
 					content := make([]byte, handler.Size)
-					if _, err := file.Read(content); nil != err {
+					if n, err := file.Read(content); err != nil {
 						logging.LogWarnf("echo read form [%s] file [%s] error: %s", k, handler.Filename, err.Error())
 					} else {
-						files[i].Content = base64.StdEncoding.EncodeToString(content)
+						files[i].Content = base64.StdEncoding.EncodeToString(content[:n])
 					}
 				}
 			}
 		}
 	}
 
-	if data, err := c.GetRawData(); nil == err {
+	if data, err := c.GetRawData(); err == nil {
 		rawData = base64.StdEncoding.EncodeToString(data)
 	} else {
 		logging.LogWarnf("echo get raw data error: %s", err.Error())
 		rawData = nil
 	}
-	c.Request.ParseForm()
-	c.Request.ParseMultipartForm(math.MaxInt64)
 
-	ret.Data = map[string]interface{}{
-		"Context": map[string]interface{}{
+	username, password, ok := c.Request.BasicAuth()
+
+	ret.Data = map[string]any{
+		"Context": map[string]any{
 			"Params":       c.Params,
 			"HandlerNames": c.HandlerNames(),
 			"FullPath":     c.FullPath(),
@@ -109,7 +107,7 @@ func echo(c *gin.Context) {
 			"IsWebsocket":  c.IsWebsocket(),
 			"RawData":      rawData,
 		},
-		"Request": map[string]interface{}{
+		"Request": map[string]any{
 			"Method":           c.Request.Method,
 			"URL":              c.Request.URL,
 			"Proto":            c.Request.Proto,
@@ -130,7 +128,7 @@ func echo(c *gin.Context) {
 			"Cookies":          c.Request.Cookies(),
 			"Referer":          c.Request.Referer(),
 		},
-		"URL": map[string]interface{}{
+		"URL": map[string]any{
 			"EscapedPath":     c.Request.URL.EscapedPath(),
 			"EscapedFragment": c.Request.URL.EscapedFragment(),
 			"String":          c.Request.URL.String(),
@@ -141,11 +139,10 @@ func echo(c *gin.Context) {
 			"Hostname":        c.Request.URL.Hostname(),
 			"Port":            c.Request.URL.Port(),
 		},
-		"User": map[string]interface{}{
-			"Username":    c.Request.URL.User.Username(),
-			"Password":    password,
-			"PasswordSet": passwordSet,
-			"String":      c.Request.URL.User.String(),
+		"User": map[string]any{
+			"Exists":   ok,
+			"Username": username,
+			"Password": password,
 		},
 	}
 }
@@ -159,10 +156,20 @@ func forwardProxy(c *gin.Context) {
 		return
 	}
 
-	destURL := arg["url"].(string)
-	if _, e := url.ParseRequestURI(destURL); nil != e {
-		ret.Code = -1
+	var destURL string
+	if !util.ParseJsonArgs(arg, ret, util.BindJsonArg("url", &destURL, true, true)) {
+		return
+	}
+	u, e := url.ParseRequestURI(destURL)
+	if nil != e {
+		ret.Code = 1
 		ret.Msg = "invalid [url]"
+		return
+	}
+
+	if u.Scheme != "http" && u.Scheme != "https" {
+		ret.Code = 2
+		ret.Msg = "only http/https is allowed"
 		return
 	}
 
@@ -170,21 +177,26 @@ func forwardProxy(c *gin.Context) {
 	if methodArg := arg["method"]; nil != methodArg {
 		method = strings.ToUpper(methodArg.(string))
 	}
-	timeout := 7 * 1000
+	timeout := 7000
 	if timeoutArg := arg["timeout"]; nil != timeoutArg {
 		timeout = int(timeoutArg.(float64))
 		if 1 > timeout {
-			timeout = 7 * 1000
+			timeout = 7000
 		}
 	}
 
-	client := req.C()
-	client.SetTimeout(time.Duration(timeout) * time.Millisecond)
+	client := getSafeClient(time.Duration(timeout) * time.Millisecond)
+	if redirectArg, ok := arg["redirect"].(bool); ok && !redirectArg {
+		client.SetRedirectPolicy(req.NoRedirectPolicy())
+	}
 	request := client.R()
-	headers := arg["headers"].([]interface{})
-	for _, pair := range headers {
-		for k, v := range pair.(map[string]interface{}) {
-			request.SetHeader(k, fmt.Sprintf("%s", v))
+	if headers, ok := arg["headers"].([]any); ok {
+		for _, pair := range headers {
+			if m, ok := pair.(map[string]any); ok {
+				for k, v := range m {
+					request.SetHeader(k, fmt.Sprintf("%v", v))
+				}
+			}
 		}
 	}
 
@@ -203,16 +215,16 @@ func forwardProxy(c *gin.Context) {
 	case "base64":
 		fallthrough
 	case "base64-std":
-		if payload, err := base64.StdEncoding.DecodeString(arg["payload"].(string)); nil != err {
-			ret.Code = -2
+		if payload, err := base64.StdEncoding.DecodeString(arg["payload"].(string)); err != nil {
+			ret.Code = 3
 			ret.Msg = "decode base64-std payload failed: " + err.Error()
 			return
 		} else {
 			request.SetBody(payload)
 		}
 	case "base64-url":
-		if payload, err := base64.URLEncoding.DecodeString(arg["payload"].(string)); nil != err {
-			ret.Code = -2
+		if payload, err := base64.URLEncoding.DecodeString(arg["payload"].(string)); err != nil {
+			ret.Code = 4
 			ret.Msg = "decode base64-url payload failed: " + err.Error()
 			return
 		} else {
@@ -221,24 +233,24 @@ func forwardProxy(c *gin.Context) {
 	case "base32":
 		fallthrough
 	case "base32-std":
-		if payload, err := base32.StdEncoding.DecodeString(arg["payload"].(string)); nil != err {
-			ret.Code = -2
+		if payload, err := base32.StdEncoding.DecodeString(arg["payload"].(string)); err != nil {
+			ret.Code = 5
 			ret.Msg = "decode base32-std payload failed: " + err.Error()
 			return
 		} else {
 			request.SetBody(payload)
 		}
 	case "base32-hex":
-		if payload, err := base32.HexEncoding.DecodeString(arg["payload"].(string)); nil != err {
-			ret.Code = -2
+		if payload, err := base32.HexEncoding.DecodeString(arg["payload"].(string)); err != nil {
+			ret.Code = 6
 			ret.Msg = "decode base32-hex payload failed: " + err.Error()
 			return
 		} else {
 			request.SetBody(payload)
 		}
 	case "hex":
-		if payload, err := hex.DecodeString(arg["payload"].(string)); nil != err {
-			ret.Code = -2
+		if payload, err := hex.DecodeString(arg["payload"].(string)); err != nil {
+			ret.Code = 7
 			ret.Msg = "decode hex payload failed: " + err.Error()
 			return
 		} else {
@@ -251,20 +263,20 @@ func forwardProxy(c *gin.Context) {
 
 	started := time.Now()
 	resp, err := request.Send(method, destURL)
-	if nil != err {
-		ret.Code = -1
+	if err != nil {
+		ret.Code = 8
 		ret.Msg = "forward request failed: " + err.Error()
 		return
 	}
 
 	bodyData, err := io.ReadAll(resp.Body)
-	if nil != err {
-		ret.Code = -1
+	if err != nil {
+		ret.Code = 9
 		ret.Msg = "read response body failed: " + err.Error()
 		return
 	}
 
-	elapsed := time.Now().Sub(started)
+	elapsed := time.Since(started)
 
 	responseEncoding := "text"
 	if responseEncodingArg := arg["responseEncoding"]; nil != responseEncodingArg {
@@ -294,7 +306,7 @@ func forwardProxy(c *gin.Context) {
 		body = string(bodyData)
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"url":          destURL,
 		"status":       resp.StatusCode,
 		"contentType":  resp.GetHeader("content-type"),
@@ -314,4 +326,300 @@ func forwardProxy(c *gin.Context) {
 	//
 	//logging.LogInfof("elapsed [%.1fs], length [%d], request [url=%s, headers=%s, content-type=%s, body=%s], status [%d], body [%s]",
 	//	elapsed.Seconds(), len(bodyData), data["url"], headers, contentType, arg["payload"], data["status"], shortBody)
+}
+
+// 创建安全的 HTTP Client，防止 SSRF 和 DNS 重绑定
+func getSafeClient(timeout time.Duration) *req.Client {
+	dialer := util.SSRFSafeDialer(timeout)
+
+	client := req.C()
+	client.SetTimeout(timeout)
+	client.SetDial(dialer.DialContext)
+	client.SetRedirectPolicy(req.MaxRedirectPolicy(3))
+	return client
+}
+
+// parseForwardProxyParams decodes the `u` and `h` query parameters.
+//
+// Query params:
+//   - `u`: RawURLEncoding base64 of the target URL string.
+//   - `h`: RawURLEncoding base64 of a JSON object map[string][]string.
+//   - `timeout`: The timeout for the request in nanoseconds.
+func parseForwardProxyParams(c *gin.Context) (parsedURL *url.URL, headers *http.Header, timeout time.Duration, err error) {
+	uParam := c.Query("u")
+	if uParam == "" {
+		err = fmt.Errorf("missing query param [u]")
+		return
+	}
+	uBytes, decErr := base64.RawURLEncoding.DecodeString(uParam)
+	if decErr != nil {
+		err = fmt.Errorf("decode [u] failed: %s", decErr.Error())
+		return
+	}
+	parsedURL, err = url.ParseRequestURI(string(uBytes))
+	if err != nil {
+		err = fmt.Errorf("parse [u] failed: %s", err.Error())
+		return
+	}
+
+	h := http.Header{}
+	headers = &h
+	hParam := c.Query("h")
+	if hParam != "" {
+		hBytes, decErr := base64.RawURLEncoding.DecodeString(hParam)
+		if decErr != nil {
+			err = fmt.Errorf("decode [h] failed: %s", decErr.Error())
+			return
+		}
+		var record map[string][]string
+		if jsonErr := json.Unmarshal(hBytes, &record); jsonErr != nil {
+			err = fmt.Errorf("parse [h] failed: %s", jsonErr.Error())
+			return
+		}
+
+		for k, vs := range record {
+			for _, v := range vs {
+				h.Add(k, v)
+			}
+		}
+	}
+
+	timeout = 30 * time.Second
+	tParam := c.Query("t")
+	if tParam != "" {
+		if t, parseErr := time.ParseDuration(tParam); parseErr != nil {
+			err = fmt.Errorf("parse [t] failed: %s", parseErr.Error())
+			return
+		} else {
+			timeout = t
+		}
+	}
+
+	return
+}
+
+// forwardResponseHeaders copies src headers into dst with a "Siyuan-Proxy-" prefix on each key.
+func forwardResponseHeaders(dst http.Header, src http.Header) {
+	for k, vs := range src {
+		for _, v := range vs {
+			dst.Add("Siyuan-Proxy-"+k, v)
+		}
+	}
+}
+
+// httpProxy proxies an HTTP request to a remote HTTP endpoint.
+//
+// Query params:
+//   - u: RawURLEncoding base64 of the target http/https URL
+//   - h: RawURLEncoding base64 of JSON map[string][]string forwarded as request headers
+//
+// The request method and body are taken from the incoming request.
+// Target response headers are forwarded with a "Siyuan-Proxy-" prefix.
+func httpProxy(c *gin.Context) {
+	targetURL, targetHeaders, timeout, err := parseForwardProxyParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": err.Error()})
+		return
+	}
+
+	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "only http/https is allowed"})
+		return
+	}
+
+	transport := &http.Transport{
+		DialContext: util.SSRFSafeDialer(timeout).DialContext,
+	}
+	httpClient := &http.Client{Transport: transport}
+
+	proxyReq, reqErr := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, targetURL.String(), c.Request.Body)
+	if reqErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "create request failed: " + reqErr.Error()})
+		return
+	}
+
+	proxyReq.ContentLength = c.Request.ContentLength
+
+	contentType := c.Request.Header.Get("Content-Type")
+	if contentType != "" {
+		proxyReq.Header.Set("Content-Type", contentType)
+	}
+
+	for k, vs := range *targetHeaders {
+		for _, v := range vs {
+			proxyReq.Header.Add(k, v)
+		}
+	}
+
+	resp, respErr := httpClient.Do(proxyReq)
+	if respErr != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "msg": "connect target failed: " + respErr.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	forwardResponseHeaders(c.Writer.Header(), resp.Header)
+	c.Writer.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
+		logging.LogWarnf("http proxy copy response failed: %s", err.Error())
+	}
+}
+
+// wsProxy proxies a WebSocket connection to a remote WebSocket endpoint.
+//
+// Query params:
+//   - u: RawURLEncoding base64 of the target ws/wss URL
+//   - h: RawURLEncoding base64 of JSON map[string][]string forwarded as handshake headers
+//
+// Target response headers are forwarded with a "Siyuan-Proxy-" prefix.
+func wsProxy(c *gin.Context) {
+	targetURL, targetHeaders, timeout, err := parseForwardProxyParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": err.Error()})
+		return
+	}
+
+	if targetURL.Scheme != "ws" && targetURL.Scheme != "wss" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "only ws/wss is allowed"})
+		return
+	}
+
+	wsDialer := &websocket.Dialer{
+		NetDialContext:   util.SSRFSafeDialer(timeout).DialContext,
+		HandshakeTimeout: timeout,
+	}
+
+	targetConn, targetResp, dialErr := wsDialer.DialContext(c.Request.Context(), targetURL.String(), *targetHeaders)
+	if dialErr != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "msg": "dial target failed: " + dialErr.Error()})
+		return
+	}
+	defer targetConn.Close()
+
+	upgradeHeaders := http.Header{}
+	if targetResp != nil {
+		forwardResponseHeaders(upgradeHeaders, targetResp.Header)
+	}
+	upgrader := websocket.Upgrader{
+		// 校验 Origin，防止跨站 WebSocket 劫持（CSWSH） https://github.com/siyuan-note/siyuan/security/advisories/GHSA-3cc2-h3v6-rqpq
+		CheckOrigin: func(r *http.Request) bool {
+			return util.IsSessionOriginAllowed(r.Header.Get("Origin"), r.Host)
+		},
+	}
+	clientConn, upgradeErr := upgrader.Upgrade(c.Writer, c.Request, upgradeHeaders)
+	if upgradeErr != nil {
+		logging.LogErrorf("ws forward proxy upgrade failed: %s", upgradeErr.Error())
+		return
+	}
+	defer clientConn.Close()
+
+	errChan := make(chan error, 2)
+	go func() {
+		for {
+			msgType, msg, readErr := targetConn.ReadMessage()
+			if readErr != nil {
+				if closeError, ok := readErr.(*websocket.CloseError); ok {
+					clientConn.WriteMessage(
+						websocket.CloseMessage,
+						websocket.FormatCloseMessage(
+							closeError.Code,
+							closeError.Text,
+						),
+					)
+				}
+				errChan <- readErr
+				return
+			}
+			if writeErr := clientConn.WriteMessage(msgType, msg); writeErr != nil {
+				errChan <- writeErr
+				return
+			}
+		}
+	}()
+	go func() {
+		for {
+			msgType, msg, readErr := clientConn.ReadMessage()
+			if readErr != nil {
+				if closeError, ok := readErr.(*websocket.CloseError); ok {
+					targetConn.WriteMessage(
+						websocket.CloseMessage,
+						websocket.FormatCloseMessage(
+							closeError.Code,
+							closeError.Text,
+						),
+					)
+				}
+				errChan <- readErr
+				return
+			}
+			if writeErr := targetConn.WriteMessage(msgType, msg); writeErr != nil {
+				errChan <- writeErr
+				return
+			}
+		}
+	}()
+	<-errChan
+}
+
+// esProxy proxies an EventSource (SSE) stream from a remote HTTP endpoint.
+//
+// Query params:
+//   - u: RawURLEncoding base64 of the target http/https URL
+//   - h: RawURLEncoding base64 of JSON map[string][]string forwarded as request headers
+//
+// Target response headers are forwarded with a "Siyuan-Proxy-" prefix.
+func esProxy(c *gin.Context) {
+	targetURL, targetHeaders, timeout, err := parseForwardProxyParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": err.Error()})
+		return
+	}
+
+	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "only http/https is allowed"})
+		return
+	}
+
+	transport := &http.Transport{
+		DialContext: util.SSRFSafeDialer(timeout).DialContext,
+	}
+	httpClient := &http.Client{Transport: transport}
+
+	proxyReq, reqErr := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, targetURL.String(), nil)
+	if reqErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "create request failed: " + reqErr.Error()})
+		return
+	}
+	for k, vs := range *targetHeaders {
+		for _, v := range vs {
+			proxyReq.Header.Add(k, v)
+		}
+	}
+	if proxyReq.Header.Get("Accept") == "" {
+		proxyReq.Header.Set("Accept", "text/event-stream")
+	}
+
+	resp, respErr := httpClient.Do(proxyReq)
+	if respErr != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "msg": "connect target failed: " + respErr.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	forwardResponseHeaders(c.Writer.Header(), resp.Header)
+	c.Writer.WriteHeader(resp.StatusCode)
+
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+		if readErr != nil {
+			return
+		}
+	}
 }

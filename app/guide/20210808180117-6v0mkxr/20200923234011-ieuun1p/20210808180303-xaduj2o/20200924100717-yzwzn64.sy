@@ -1,12 +1,12 @@
 {
 	"ID": "20200924100717-yzwzn64",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20200924100717-yzwzn64",
 		"title": "Kernel parameter",
 		"type": "doc",
-		"updated": "20221025095725"
+		"updated": "20260718113226"
 	},
 	"Children": [
 		{
@@ -157,7 +157,7 @@
 					"TextMarkType": "block-ref",
 					"TextMarkBlockRefID": "20210104091447-3vmymbk",
 					"TextMarkBlockRefSubtype": "s",
-					"TextMarkTextContent": "authentication password"
+					"TextMarkTextContent": "lock screen password"
 				},
 				{
 					"Type": "NodeText",
@@ -212,7 +212,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220517144139-qeoe1f3",
-				"updated": "20220517144139"
+				"updated": "20260302173748"
 			},
 			"Children": [
 				{
@@ -227,7 +227,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220517144139-7q5hnts",
-				"updated": "20220517144139"
+				"updated": "20260718113226"
 			},
 			"Children": [
 				{
@@ -237,56 +237,209 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "--lang=zh_CN"
+					"TextMarkTextContent": "--lang=zh-CN"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " will use Simplified Chinese to initialize the appearance language, the default is "
+					"Data": "​ will use Simplified Chinese to initialize the appearance language. If omitted, SiYuan uses the saved language; on first initialization it matches the system language and falls back to "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "en_US"
+					"TextMarkTextContent": "en"
 				},
 				{
 					"Type": "NodeText",
-					"Data": ". Currently available values: "
+					"Data": "​ if no match is found. Currently available values: "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "zh_CN"
+					"TextMarkTextContent": "ar"
 				},
 				{
 					"Type": "NodeText",
-					"Data": ", "
+					"Data": "​, "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "zh_CHT"
+					"TextMarkTextContent": "de"
 				},
 				{
 					"Type": "NodeText",
-					"Data": ", "
+					"Data": "​, "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "en_US"
+					"TextMarkTextContent": "en"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " and "
+					"Data": "​, "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "fr_FR"
+					"TextMarkTextContent": "es"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "."
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "fr"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "he"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "hi"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "id"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "it"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "ja"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "ko"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "nl"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "pl"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "pt-BR"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "ru"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "sk"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "th"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "tr"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "uk"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​, "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "zh-CN"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ and "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "zh-TW"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​."
 				}
 			]
 		},

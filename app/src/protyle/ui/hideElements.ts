@@ -1,22 +1,23 @@
-/// #if MOBILE
-import {getCurrentEditor} from "../../mobile/editor";
-/// #else
 import {getAllEditor} from "../../layout/getAll";
-/// #endif
+import {hideRectResizeHandles} from "../../asset/rectAnnotationResize";
+import {isIPhone} from "../util/compatibility";
+import {hideGutterElements} from "./gutterVisibility";
+import {closeSubElement} from "../toolbar/subElementLifecycle";
 
-// "gutter", "toolbar", "select", "hint", "util", "dialog"
+// "gutter", "toolbar", "select", "hint", "util", "dialog", "gutterOnly"
 export const hideElements = (panels: string[], protyle?: IProtyle, focusHide = false) => {
     if (!protyle) {
         if (panels.includes("dialog")) {
-            for (let i = 0; i < window.siyuan.dialogs.length; i++) {
+            const dialogLength = window.siyuan.dialogs.length;
+            for (let i = 0; i < dialogLength; i++) {
                 window.siyuan.dialogs[i].destroy();
-                i--;
             }
         }
         return;
     }
     if (panels.includes("hint")) {
         clearTimeout(protyle.hint.timeId);
+        protyle.hint.deactivateEmojiPanel();
         protyle.hint.element.classList.add("fn__none");
     }
     if (protyle.gutter && panels.includes("gutter")) {
@@ -28,9 +29,16 @@ export const hideElements = (panels: string[], protyle?: IProtyle, focusHide = f
         });
     }
     //  不能 remove("protyle-wysiwyg--hl") 否则打开页签的时候 "cb-get-hl" 高亮会被移除
-    if (protyle.gutter && panels.includes("gutterOnly")) {
-        protyle.gutter.element.classList.add("fn__none");
-        protyle.gutter.element.innerHTML = "";
+    if (panels.includes("gutterOnly")) {
+        const gutterElements: HTMLElement[] = [];
+        if (protyle.gutter) {
+            gutterElements.push(protyle.gutter.element);
+        }
+        const nestedGutter = protyle.contentElement.querySelector<HTMLElement>(".protyle-gutters:not(.fn__none)");
+        if (nestedGutter) {
+            gutterElements.push(nestedGutter);
+        }
+        hideGutterElements(gutterElements, !isIPhone());
     }
     if (protyle.toolbar && panels.includes("toolbar")) {
         protyle.toolbar.element.classList.add("fn__none");
@@ -38,12 +46,10 @@ export const hideElements = (panels: string[], protyle?: IProtyle, focusHide = f
     }
     if (protyle.toolbar && panels.includes("util")) {
         const pinElement = protyle.toolbar.subElement.querySelector('[data-type="pin"]');
-        if (focusHide || !pinElement || (pinElement && pinElement.getAttribute("aria-label") === window.siyuan.languages.pin)) {
+        if (!protyle.toolbar.isMultiSelectMode() &&
+            (focusHide || !pinElement || (pinElement && pinElement.getAttribute("aria-label") === window.siyuan.languages.pin))) {
             protyle.toolbar.subElement.classList.add("fn__none");
-            if (protyle.toolbar.subElementCloseCB) {
-                protyle.toolbar.subElementCloseCB();
-                protyle.toolbar.subElementCloseCB = undefined;
-            }
+            closeSubElement(protyle.toolbar);
         }
     }
     if (panels.includes("select")) {
@@ -64,31 +70,22 @@ export const hideAllElements = (types: string[]) => {
         });
     }
     if (types.includes("util")) {
-        /// #if MOBILE
-        const editor = getCurrentEditor();
-        if (editor) {
-            editor.protyle.toolbar.subElement.classList.add("fn__none");
-            if (editor.protyle.toolbar.subElementCloseCB) {
-                editor.protyle.toolbar.subElementCloseCB();
-                editor.protyle.toolbar.subElementCloseCB = undefined;
-            }
-        }
-        /// #else
         getAllEditor().forEach(item => {
             if (item.protyle.toolbar) {
-                item.protyle.toolbar.subElement.classList.add("fn__none");
-                if (item.protyle.toolbar.subElementCloseCB) {
-                    item.protyle.toolbar.subElementCloseCB();
-                    item.protyle.toolbar.subElementCloseCB = undefined;
+                const pinElement = item.protyle.toolbar.subElement.querySelector('[data-type="pin"]');
+                if (!item.protyle.toolbar.isMultiSelectMode() &&
+                    (!pinElement || (pinElement && pinElement.getAttribute("aria-label") === window.siyuan.languages.pin))) {
+                    item.protyle.toolbar.subElement.classList.add("fn__none");
+                    closeSubElement(item.protyle.toolbar);
                 }
             }
         });
-        /// #endif
     }
     if (types.includes("pdfutil")) {
         document.querySelectorAll(".pdf__util").forEach(item => {
             item.classList.add("fn__none");
         });
+        hideRectResizeHandles(document);
     }
     if (types.includes("gutter")) {
         document.querySelectorAll(".protyle-gutters").forEach(item => {

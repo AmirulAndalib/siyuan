@@ -1,24 +1,60 @@
-import {App} from "../index";
+import type {App} from "../index";
 import {EventBus} from "./EventBus";
 import {fetchPost} from "../util/fetch";
 import {isMobile, isWindow} from "../util/functions";
 /// #if !MOBILE
 import {Custom} from "../layout/dock/Custom";
-import {getAllModels} from "../layout/getAll";
+import {getAllEditor, getAllModels} from "../layout/getAll";
 import {Tab} from "../layout/Tab";
-import {setPanelFocus} from "../layout/util";
-import {getDockByType} from "../layout/tabUtil";
+import {resizeTopBar, setPanelFocus} from "../layout/util";
+import {getDockByType, setTabPosition} from "../layout/tabUtil";
+import {clearOBG} from "../layout/dock/util";
 ///#else
 import {MobileCustom} from "../mobile/dock/MobileCustom";
+/// #endif
+/// #if !BROWSER
+import {ipcRenderer} from "electron";
 /// #endif
 import {hasClosestByAttribute} from "../protyle/util/hasClosest";
 import {BlockPanel} from "../block/Panel";
 import {Setting} from "./Setting";
+import {Constants} from "../constants";
+import {uninstall} from "./uninstall";
+import {addPluginDock, afterLoadPlugin, loadPlugins} from "./loader";
+import {normalizeStoragePath} from "../util/pathName";
+import {Kernel} from "./kernel";
+import {IAgentCapabilityEffects, registerCapability} from "../layout/dock/agent/frontendCapabilities";
+import {isDisallowedTextInputHotkey, normalizePluginHotkey} from "../util/hotKeyPolicy";
+
+const updatePluginKeymap = (pluginName: string, key: string, hotkey: unknown) => {
+    if (!window.siyuan.config.keymap.plugin) {
+        window.siyuan.config.keymap.plugin = {};
+    }
+    if (!window.siyuan.config.keymap.plugin[pluginName]) {
+        window.siyuan.config.keymap.plugin[pluginName] = {};
+    }
+    const keymapItem = window.siyuan.config.keymap.plugin[pluginName][key];
+    const normalized = normalizePluginHotkey(hotkey, keymapItem?.custom);
+    if (!keymapItem) {
+        window.siyuan.config.keymap.plugin[pluginName][key] = {
+            default: normalized.defaultHotkey,
+            custom: normalized.customHotkey,
+        };
+    } else {
+        keymapItem.default = normalized.defaultHotkey;
+        keymapItem.custom = normalized.customHotkey;
+    }
+    normalized.ignoredHotkeys.forEach((ignoredHotkey) => {
+        console.warn(`Plugin ${pluginName} ignored disallowed hotkey "${ignoredHotkey}" for "${key}".`);
+    });
+    return window.siyuan.config.keymap.plugin[pluginName][key];
+};
 
 export class Plugin {
     private app: App;
-    public i18n: IObject;
+    public i18n: Record<string, string>;
     public eventBus: EventBus;
+    public kernel: Kernel;
     public data: any = {};
     public displayName: string;
     public readonly name: string;
@@ -26,7 +62,7 @@ export class Plugin {
         filter: string[],
         html: string,
         id: string,
-        callback: (protyle: import("../protyle").Protyle) => void
+        callback: (protyle: import("../protyle").Protyle, nodeElement: HTMLElement) => void
     }[] = [];
     // TODO
     public customBlockRenders: {
@@ -41,6 +77,7 @@ export class Plugin {
     public setting: Setting;
     public statusBarIcons: Element[] = [];
     public commands: ICommand[] = [];
+    public agentCapabilities: Array<{id: string; generation: number}> = [];
     public models: {
         /// #if !MOBILE
         [key: string]: (options: { tab: Tab, data: any }) => Custom
@@ -56,27 +93,42 @@ export class Plugin {
             /// #endif
         }
     } = {};
-    private protyleOptionsValue: IOptions;
+    private protyleOptionsValue: IProtyleOptions;
 
     constructor(options: {
         app: App,
         name: string,
         displayName: string,
-        i18n: IObject
+        i18n: Record<string, string>
     }) {
         this.app = options.app;
         this.i18n = options.i18n;
         this.displayName = options.displayName;
         this.eventBus = new EventBus(options.name);
+        this.kernel = new Kernel({
+            appId: options.app.appId,
+            name: options.name,
+            eventBus: this.eventBus,
+        });
 
         // https://github.com/siyuan-note/siyuan/issues/9943
         Object.defineProperty(this, "name", {
             value: options.name,
             writable: false,
         });
+
+        this.updateProtyleToolbar([]).forEach(toolbarItem => {
+            if (typeof toolbarItem === "string" || Constants.INLINE_TYPE.concat("|").includes(toolbarItem.name)) {
+                return;
+            }
+            if (typeof toolbarItem.hotkey !== "string") {
+                toolbarItem.hotkey = "";
+            }
+            toolbarItem.hotkey = updatePluginKeymap(options.name, toolbarItem.name, toolbarItem.hotkey).default;
+        });
     }
 
-    public onload() {
+    public onload(): Promise<void> | void {
         // 加载
     }
 
@@ -88,6 +140,23 @@ export class Plugin {
         // 卸载
     }
 
+    public onDataChanged() {
+        // 存储数据变更
+        // 兼容 3.4.1 以前同步数据使用重载插件的问题
+        uninstall(this.app, this.name, true);
+        loadPlugins(this.app, [this.name], false).then(() => {
+            this.app.plugins.find(item => {
+                if (this.name === item.name) {
+                    afterLoadPlugin(item);
+                    getAllEditor().forEach(editor => {
+                        editor.protyle.toolbar.update(editor.protyle);
+                    });
+                    return true;
+                }
+            });
+        });
+    }
+
     public async updateCards(options: ICardData) {
         return options;
     }
@@ -97,20 +166,50 @@ export class Plugin {
     }
 
     public addCommand(command: ICommand) {
-        this.commands.push(command);
+        if (typeof command.hotkey !== "string") {
+            command.hotkey = "";
+        }
+        const keymapItem = updatePluginKeymap(this.name, command.langKey, command.hotkey);
+        command.hotkey = keymapItem.default;
+        command.customHotkey = keymapItem.custom;
+        if (typeof command.customHotkey !== "string") {
+            console.error(`${this.name} - commands data is error and has been removed.`);
+        } else {
+            this.commands.push(command);
+            /// #if !BROWSER
+            if (command.globalCallback && command.customHotkey && !isDisallowedTextInputHotkey(command.customHotkey)) {
+                ipcRenderer.send(Constants.SIYUAN_CMD, {
+                    cmd: "registerGlobalShortcut",
+                    accelerator: command.customHotkey
+                });
+            }
+            /// #endif
+        }
     }
 
     public addIcons(svg: string) {
-        document.body.insertAdjacentHTML("afterbegin", `<svg data-name="${this.name}" style="position: absolute; width: 0; height: 0; overflow: hidden;" xmlns="http://www.w3.org/2000/svg">
+        const svgElement = document.querySelector(`svg[data-name="${this.name}"] defs`);
+        if (svgElement) {
+            svgElement.insertAdjacentHTML("afterbegin", svg);
+        } else {
+            const lastSvgElement = document.querySelector("body > svg:last-of-type");
+            if (lastSvgElement) {
+                lastSvgElement.insertAdjacentHTML("afterend", `<svg data-name="${this.name}" style="position: absolute; width: 0; height: 0; overflow: hidden;" xmlns="http://www.w3.org/2000/svg">
 <defs>${svg}</defs></svg>`);
+            } else {
+                document.body.insertAdjacentHTML("afterbegin", `<svg data-name="${this.name}" style="position: absolute; width: 0; height: 0; overflow: hidden;" xmlns="http://www.w3.org/2000/svg">
+<defs>${svg}</defs></svg>`);
+            }
+        }
     }
 
     public addTopBar(options: {
         icon: string,
         title: string,
-        position?: "right" | "left",
+        position?: "south" | "left",
         callback: (evt: MouseEvent) => void
     }) {
+        options.icon = options.icon.trim();
         if (!options.icon.startsWith("icon") && !options.icon.startsWith("<svg")) {
             console.error(`plugin ${this.name} addTopBar error: icon must be svg id or svg tag`);
             return;
@@ -121,16 +220,35 @@ export class Plugin {
         iconElement.id = `plugin_${this.name}_${this.topBarIcons.length}`;
         if (isMobile()) {
             iconElement.className = "b3-menu__item";
-            iconElement.innerHTML = (options.icon.startsWith("icon") ? `<svg class="b3-menu__icon"><use xlink:href="#${options.icon}"></use></svg>` : options.icon) +
+            const iconHTML = options.icon.startsWith("icon") ?
+                `<svg class="b3-menu__icon"><use xlink:href="#${options.icon}"></use></svg>` :
+                `<span class="b3-menu__icon b3-menu__icon--custom">${options.icon}</span>`;
+            iconElement.innerHTML = iconHTML +
                 `<span class="b3-menu__label">${options.title}</span>`;
         } else if (!isWindow()) {
             iconElement.className = "toolbar__item ariaLabel";
             iconElement.setAttribute("aria-label", options.title);
             iconElement.innerHTML = options.icon.startsWith("icon") ? `<svg><use xlink:href="#${options.icon}"></use></svg>` : options.icon;
             iconElement.addEventListener("click", options.callback);
-            iconElement.setAttribute("data-position", options.position || "right");
+            iconElement.setAttribute("data-location", options.position || "right");
+            resizeTopBar();
+        }
+        if (isMobile() && window.siyuan.storage) {
+            if (!window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN].includes(iconElement.id)) {
+                document.getElementById("menuPluginTopBar")?.after(iconElement);
+            }
+        } else if (!isWindow() && window.siyuan.storage) {
+            if (window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN].includes(iconElement.id)) {
+                iconElement.classList.add("fn__none");
+            }
+            document.querySelector("#" + (iconElement.getAttribute("data-location") === "right" ? "barPlugins" : "drag"))?.before(iconElement);
         }
         this.topBarIcons.push(iconElement);
+        /// #if !MOBILE
+        if (!isWindow()) {
+            setTabPosition(true);
+        }
+        /// #endif
         return iconElement;
     }
 
@@ -139,8 +257,16 @@ export class Plugin {
         position?: "right" | "left",
     }) {
         /// #if !MOBILE
-        options.element.setAttribute("data-position", options.position || "right");
+        options.element.setAttribute("data-location", options.position || "right");
         this.statusBarIcons.push(options.element);
+        const statusElement = document.getElementById("status");
+        if (statusElement) {
+            if (options.element.getAttribute("data-location") === "right") {
+                statusElement.insertAdjacentElement("beforeend", options.element);
+            } else {
+                statusElement.insertAdjacentElement("afterbegin", options.element);
+            }
+        }
         return options.element;
         /// #endif
     }
@@ -149,33 +275,52 @@ export class Plugin {
         if (!this.setting) {
             return;
         }
-        this.setting.open(this.name);
+        this.setting.open(this.displayName || this.name);
     }
 
-    public loadData(storageName: string) {
+    public loadData(storageName: string): Promise<any> {
         if (typeof this.data[storageName] === "undefined") {
             this.data[storageName] = "";
         }
         return new Promise((resolve) => {
-            fetchPost("/api/file/getFile", {path: `/data/storage/petal/${this.name}/${storageName}`}, (response) => {
-                if (response.code !== 404) {
-                    this.data[storageName] = response;
-                }
+            fetchPost("/api/file/getFile", {
+                path: `/data/storage/petal/${this.name}/${normalizeStoragePath(storageName)}`
+            }, (response) => {
+                this.data[storageName] = response;
+                resolve(this.data[storageName]);
+            }, null, () => {
                 resolve(this.data[storageName]);
             });
         });
     }
 
-    public saveData(storageName: string, data: any) {
-        return new Promise((resolve) => {
-            const pathString = `/data/storage/petal/${this.name}/${storageName}`;
+    public saveData(storageName: string, data: any): Promise<any | IWebSocketData> {
+        if (window.siyuan.config.readonly || window.siyuan.isPublish) {
+            return Promise.reject({
+                code: 403,
+                msg: "Readonly mode or publish mode",
+                data: null
+            });
+        }
+        return new Promise((resolve, reject) => {
+            const pathString = `/data/storage/petal/${this.name}/${normalizeStoragePath(storageName)}`;
             let file: File;
-            if (typeof data === "object") {
-                file = new File([new Blob([JSON.stringify(data)], {
-                    type: "application/json"
-                })], pathString.split("/").pop());
-            } else {
-                file = new File([new Blob([data])], pathString.split("/").pop());
+            try {
+                const fileName = pathString.split("/").pop();
+                if (typeof data === "object") {
+                    file = new File([new Blob([JSON.stringify(data)], {
+                        type: "application/json"
+                    })], fileName);
+                } else {
+                    file = new File([new Blob([data])], fileName);
+                }
+            } catch (e) {
+                reject({
+                    code: 400,
+                    msg: e instanceof Error ? e.message : String(e),
+                    data: null
+                });
+                return;
             }
             const formData = new FormData();
             formData.append("path", pathString);
@@ -188,12 +333,19 @@ export class Plugin {
         });
     }
 
-    public removeData(storageName: string) {
+    public removeData(storageName: string): Promise<IWebSocketData> {
+        if (window.siyuan.config.readonly || window.siyuan.isPublish) {
+            return Promise.reject({
+                code: 403,
+                msg: "Readonly mode or publish mode",
+                data: null
+            } as IWebSocketData);
+        }
         return new Promise((resolve) => {
             if (!this.data) {
                 this.data = {};
             }
-            fetchPost("/api/file/removeFile", {path: `/data/storage/petal/${this.name}/${storageName}`}, (response) => {
+            fetchPost("/api/file/removeFile", {path: `/data/storage/petal/${this.name}/${normalizeStoragePath(storageName)}`}, (response) => {
                 delete this.data[storageName];
                 resolve(response);
             });
@@ -239,12 +391,72 @@ export class Plugin {
                 update: options.update,
             });
             customObj.element.addEventListener("click", () => {
+                clearOBG();
                 setPanelFocus(customObj.element.parentElement.parentElement);
             });
             return customObj;
         };
         return this.models[type2];
         /// #endif
+    }
+
+    // Register a frontend action that the AI agent can discover and invoke. The action is exposed
+    // to the LLM under the full name "plugin__<pluginName>__<name>" with the given description, and
+    // is dispatched via the "frontend" tool. On uninstall, all registered actions are removed.
+    /**
+     * 按名称取密钥值（来自「设置 → 密钥和变量」的密钥库）。找不到时返回空字符串。
+     * 密钥在内核侧加密存储，此处读到的是运行时明文；仅在本地管理员身份下可用。
+     */
+    public getSecret(name: string): string {
+        const found = window.siyuan.config.secrets?.items?.find((item) => item.name === name);
+        return found ? found.value : "";
+    }
+
+    /**
+     * 按名称取变量值（来自「设置 → 密钥和变量」的变量库）。找不到时返回空字符串。
+     * 变量以明文存储，用于非敏感配置。
+     */
+    public getVariable(name: string): string {
+        const found = window.siyuan.config.variables?.items?.find((item) => item.name === name);
+        return found ? found.value : "";
+    }
+
+    public addAgentCapability(options: {
+        name: string,
+        title?: string,
+        description: string,
+        inputSchema: Record<string, unknown>,
+        outputSchema?: Record<string, unknown>,
+        effects?: IAgentCapabilityEffects,
+        actionEffects?: Record<string, IAgentCapabilityEffects>,
+        handler: (args: Record<string, unknown>, app: App) => Promise<{
+            result?: string;
+            structuredContent?: unknown;
+            error?: string;
+        }>
+    }): string {
+        const name = options.name.trim();
+        if (!name || !options.description.trim()) {
+            throw new Error("Agent capability name and description are required");
+        }
+        const id = "plugin/frontend/" + encodeURIComponent(this.name) + "/" + encodeURIComponent(name);
+        if (!this.agentCapabilities.some((capability) => capability.id === id)) {
+            const generation = registerCapability({
+                id,
+                title: options.title,
+                description: options.description,
+                inputSchema: options.inputSchema,
+                outputSchema: options.outputSchema,
+                effects: options.effects,
+                actionEffects: options.actionEffects,
+                source: "plugin",
+                ownerId: this.name,
+                ownerName: this.displayName || this.name,
+                handler: options.handler,
+            });
+            this.agentCapabilities.push({id, generation});
+        }
+        return id;
     }
 
     public addDock(options: {
@@ -292,34 +504,40 @@ export class Plugin {
                         getDockByType(type2).toggleModel(type2);
                     }
                 });
-                customObj.element.classList.add("sy__" + type2);
+                customObj.element.classList.add("sy__" + type2, "dockPanel");
                 return customObj;
             }
             /// #endif
         };
+        options.config.hotkey = updatePluginKeymap(this.name, type2, options.config.hotkey).default;
+        addPluginDock(this);
         return this.docks[type2];
     }
 
     public addFloatLayer = (options: {
-        ids: string[],
-        defIds?: string[],
+        refDefs: IRefDefs[],
         x?: number,
         y?: number,
         targetElement?: HTMLElement,
+        originalRefBlockIDs?: IObject,
         isBacklink: boolean,
     }) => {
         window.siyuan.blockPanels.push(new BlockPanel({
             app: this.app,
+            originalRefBlockIDs: options.originalRefBlockIDs,
             targetElement: options.targetElement,
             isBacklink: options.isBacklink,
             x: options.x,
             y: options.y,
-            nodeIds: options.ids,
-            defIds: options.defIds,
+            refDefs: options.refDefs,
         }));
     };
 
-    set protyleOptions(options: IOptions) {
+    public updateProtyleToolbar(toolbar: Array<string | IMenuItem>) {
+        return toolbar;
+    }
+
+    set protyleOptions(options: IProtyleOptions) {
         this.protyleOptionsValue = options;
     }
 

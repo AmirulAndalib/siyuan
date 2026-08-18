@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -30,11 +30,11 @@ import (
 )
 
 func HandleSignal() {
-	c := make(chan os.Signal)
+	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
 	s := <-c
 	logging.LogInfof("received os signal [%s], exit kernel process now", s)
-	Close(false, 1)
+	Close(false, true, 1)
 }
 
 var (
@@ -42,7 +42,7 @@ var (
 )
 
 func HookDesktopUIProcJob() {
-	if util.ContainerStd != util.Container || "dev" == util.Mode {
+	if !util.AttachUI || util.ContainerStd != util.Container || "dev" == util.Mode {
 		return
 	}
 
@@ -78,22 +78,22 @@ func HookDesktopUIProcJob() {
 	}
 
 	logging.LogWarnf("confirmed no active UI proc, exit kernel process now")
-	Close(false, 1)
+	Close(false, true, 1)
 }
 
 var uiProcNames = []string{"siyuan", "electron"}
 
 // getAttachedUIProcCount 获取已经附加的 UI 进程数。
 func getAttachedUIProcCount() (ret int) {
-	util.UIProcessIDs.Range(func(uiProcIDArg, _ interface{}) bool {
+	util.UIProcessIDs.Range(func(uiProcIDArg, _ any) bool {
 		uiProcID, err := strconv.Atoi(uiProcIDArg.(string))
-		if nil != err {
+		if err != nil {
 			logging.LogErrorf("invalid UI proc ID [%s]: %s", uiProcIDArg, err)
 			return true
 		}
 
 		proc, err := goPS.FindProcess(uiProcID)
-		if nil != err {
+		if err != nil {
 			logging.LogErrorf("find UI proc [%d] failed: %s", uiProcID, err)
 			return true
 		}

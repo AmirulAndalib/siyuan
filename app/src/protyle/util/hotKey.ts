@@ -67,17 +67,16 @@ export const matchHotKey = (hotKey: string, event: KeyboardEvent) => {
         return false;
     }
 
-    const hotKeys = hotKey.split("");
-    if (hotKey.indexOf("F") > -1) {
-        hotKeys.forEach((item, index) => {
-            if (item === "F") {
-                // F1-F12
-                hotKeys[index] = "F" + hotKeys.splice(index + 1, 1);
-                if (hotKeys[index + 1]) {
-                    hotKeys[index + 1] += hotKeys.splice(index + 1, 1);
-                }
-            }
-        });
+    // 将快捷键字符串拆分为 多个修饰键 + 一个主键，例如 ⌥⇧F10 → ["⌥", "⇧", "F10"]
+    const hotKeys: string[] = [];
+    let hotKeyIndex = 0;
+    while (hotKeyIndex < hotKey.length && "⌃⌥⇧⌘".includes(hotKey[hotKeyIndex])) {
+        hotKeys.push(hotKey[hotKeyIndex]);
+        hotKeyIndex++;
+    }
+    const mainKey = hotKey.slice(hotKeyIndex);
+    if (mainKey) {
+        hotKeys.push(mainKey);
     }
 
     // 是否匹配 ⇧[]
@@ -95,7 +94,7 @@ export const matchHotKey = (hotKey: string, event: KeyboardEvent) => {
         }
         const isMatchKey = keyCode === Constants.KEYCODELIST[event.keyCode];
         // 是否匹配 ⌥[] / ⌥⌘[]
-        if (isMatchKey && event.altKey && !event.shiftKey &&
+        if (isMatchKey && event.altKey && !event.shiftKey && hotKeys.length < 4 &&
             (hotKeys.length === 3 ? (isOnlyMeta(event) && hotKey.startsWith("⌥⌘")) : isNotCtrl(event))) {
             return true;
         }
@@ -166,3 +165,35 @@ export const matchHotKey = (hotKey: string, event: KeyboardEvent) => {
     return false;
 };
 
+export const isIncludesHotKey = (hotKey: string) => {
+    let isInclude = false;
+    Object.keys(window.siyuan.config.keymap).find(key => {
+        const item = window.siyuan.config.keymap[key as "editor"];
+        Object.keys(item).find(key2 => {
+            const item2 = item[key2 as "general"];
+            if (typeof item2.custom === "string") {
+                if (item2.custom === hotKey) {
+                    isInclude = true;
+                    return true;
+                }
+            } else {
+                Object.keys(item2).forEach(key3 => {
+                    const item3: Config.IKey = item2[key3];
+                    if (item3.custom === hotKey) {
+                        isInclude = true;
+                        return true;
+                    }
+                });
+                if (isInclude) {
+                    return true;
+                }
+            }
+        });
+
+        if (isInclude) {
+            return true;
+        }
+    });
+
+    return isInclude;
+};

@@ -1,11 +1,12 @@
 {
 	"ID": "20211226122358-hctqcn5",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20211226122358-hctqcn5",
 		"title": "Kernel 參數",
-		"updated": "20221025095721"
+		"type": "doc",
+		"updated": "20260718113226"
 	},
 	"Children": [
 		{
@@ -216,7 +217,7 @@
 					"TextMarkType": "block-ref",
 					"TextMarkBlockRefID": "20211226122545-lsv6dhu",
 					"TextMarkBlockRefSubtype": "s",
-					"TextMarkTextContent": "鑒權密碼"
+					"TextMarkTextContent": "鎖屏密碼"
 				},
 				{
 					"Type": "NodeText",
@@ -291,7 +292,7 @@
 			"HeadingLevel": 3,
 			"Properties": {
 				"id": "20220517144220-400hbxb",
-				"updated": "20220517144220"
+				"updated": "20260302173650"
 			},
 			"Children": [
 				{
@@ -316,105 +317,219 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20220517144220-5dryt3i",
-				"updated": "20220517144233"
+				"updated": "20260718113226"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "使用 ",
-					"Properties": {
-						"id": ""
-					}
+					"Data": "使用 "
 				},
 				{
 					"Type": "NodeTextMark",
-					"Properties": {
-						"id": ""
-					},
 					"TextMarkType": "code",
-					"TextMarkTextContent": "--lang=zh_CN"
+					"TextMarkTextContent": "--lang=zh-CN"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 後將使用簡體中文初始化外觀語言，預設 ",
-					"Properties": {
-						"id": ""
-					}
+					"Data": "​ 後將使用簡體中文初始化外觀語言。未指定時使用已儲存的語言；首次初始化時比對系統語言，無法比對則回退至 "
 				},
 				{
 					"Type": "NodeTextMark",
-					"Properties": {
-						"id": ""
-					},
 					"TextMarkType": "code",
-					"TextMarkTextContent": "en_US"
+					"TextMarkTextContent": "en"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "。目前可選值：",
-					"Properties": {
-						"id": ""
-					}
+					"Data": "​。目前可選值："
 				},
 				{
 					"Type": "NodeTextMark",
-					"Properties": {
-						"id": ""
-					},
 					"TextMarkType": "code",
-					"TextMarkTextContent": "zh_CN"
+					"TextMarkTextContent": "ar"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "、",
-					"Properties": {
-						"id": ""
-					}
+					"Data": "​、"
 				},
 				{
 					"Type": "NodeTextMark",
-					"Properties": {
-						"id": ""
-					},
 					"TextMarkType": "code",
-					"TextMarkTextContent": "zh_CHT"
+					"TextMarkTextContent": "de"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "、",
-					"Properties": {
-						"id": ""
-					}
+					"Data": "​、"
 				},
 				{
 					"Type": "NodeTextMark",
-					"Properties": {
-						"id": ""
-					},
 					"TextMarkType": "code",
-					"TextMarkTextContent": "en_US"
+					"TextMarkTextContent": "en"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 和 ",
-					"Properties": {
-						"id": ""
-					}
+					"Data": "​、"
 				},
 				{
 					"Type": "NodeTextMark",
-					"Properties": {
-						"id": ""
-					},
 					"TextMarkType": "code",
-					"TextMarkTextContent": "fr_FR"
+					"TextMarkTextContent": "es"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "。",
-					"Properties": {
-						"id": ""
-					}
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "fr"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "he"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "hi"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "id"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "it"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "ja"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "ko"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "nl"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "pl"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "pt-BR"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "ru"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "sk"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "th"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "tr"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "uk"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​、"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "zh-CN"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ 和 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "zh-TW"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​。"
 				}
 			]
 		},

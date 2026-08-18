@@ -5,16 +5,16 @@ import {fetchPost} from "../../util/fetch";
 import {getIconByType} from "../../editor/getIcon";
 import {preventScroll} from "../../protyle/scroll/preventScroll";
 import {openModel} from "./model";
-import {getDisplayName, getNotebookIcon, getNotebookName, movePathTo, pathPosix} from "../../util/pathName";
+import {getDisplayName, getNotebookIcon, getNotebookName, isEncryptedBox, movePathTo, pathPosix} from "../../util/pathName";
 import {getKeyByLiElement, initCriteriaMenu, moreMenu} from "../../search/menu";
 import {setStorageVal} from "../../protyle/util/compatibility";
-import {escapeGreat, escapeHtml} from "../../util/escape";
+import {escapeHtml} from "../../util/escape";
 import {unicode2Emoji} from "../../emoji";
-import {newFileByName} from "../../util/newFile";
+import {newFile} from "../../util/newFile";
 import {showMessage} from "../../dialog/message";
 import {reloadProtyle} from "../../protyle/util/reload";
-import {activeBlur, hideKeyboardToolbar} from "../util/keyboardToolbar";
-import {App} from "../../index";
+import {activeBlur} from "../util/keyboardToolbar";
+import type {App} from "../../index";
 import {
     assetFilterMenu,
     assetInputEvent,
@@ -25,9 +25,18 @@ import {
 } from "../../search/assets";
 import {addClearButton} from "../../util/addClearButton";
 import {checkFold} from "../../util/noRelyPCFunction";
+import {getDefaultSubType, getDefaultType} from "../../search/getDefault";
+import {
+    saveAssetKeyList,
+    saveKeyList,
+    toggleAssetHistory,
+    toggleReplaceHistory,
+    toggleSearchHistory
+} from "../../search/toggleHistory";
+import {cancelSearchRequest, scheduleSearchRequest} from "../../search/request";
 
-const replace = (element: Element, config: ISearchOption, isAll: boolean) => {
-    if (config.method === 1 || config.method === 2) {
+const replace = (element: Element, config: Config.IUILayoutTabSearchConfig, isAll: boolean) => {
+    if (config.method === 2) {
         showMessage(window.siyuan.languages._kernel[132]);
         return;
     }
@@ -38,27 +47,26 @@ const replace = (element: Element, config: ISearchOption, isAll: boolean) => {
     if (!loadElement.classList.contains("fn__none")) {
         return;
     }
-    let currentLiElement: HTMLElement = searchListElement.querySelector(".b3-list-item--focus");
+    saveKeyList("replaceKeys", replaceInputElement.value, config);
+    const currentLiElement: HTMLElement = searchListElement.querySelector(".b3-list-item--focus");
     if (!currentLiElement) {
         return;
     }
     loadElement.classList.remove("fn__none");
     loadElement.nextElementSibling.classList.add("fn__none");
-    let ids: string[] = [];
-    if (isAll) {
-        searchListElement.querySelectorAll('.b3-list-item[data-type="search-item"]').forEach(item => {
-            ids.push(item.getAttribute("data-node-id"));
-        });
-    } else {
-        ids = [currentLiElement.getAttribute("data-node-id")];
-    }
+    const currentId = currentLiElement.getAttribute("data-node-id");
     fetchPost("/api/search/findReplace", {
-        k: config.method === 0 ? getKeyByLiElement(currentLiElement) : (document.querySelector("#toolbarSearch") as HTMLInputElement).value,
+        k: config.method === 0 || config.method === 1 ? getKeyByLiElement(currentLiElement) : (document.querySelector("#toolbarSearch") as HTMLInputElement).value,
         r: replaceInputElement.value,
-        ids,
+        ids: isAll ? [] : [currentId],
         types: config.types,
+        subTypes: config.subTypes,
         method: config.method,
-        replaceTypes: config.replaceTypes
+        replaceTypes: config.replaceTypes,
+        paths: config.idPath || [],
+        groupBy: config.group,
+        orderBy: config.sort,
+        page: config.page,
     }, (response) => {
         loadElement.classList.add("fn__none");
         loadElement.nextElementSibling.classList.remove("fn__none");
@@ -67,45 +75,33 @@ const replace = (element: Element, config: ISearchOption, isAll: boolean) => {
             showMessage(response.msg);
             return;
         }
-        if (ids.length > 1) {
+        if (isAll) {
+            updateSearchResult(config, element, false);
             return;
         }
         reloadProtyle(window.siyuan.mobile.editor.protyle, false);
 
+        let newId = currentLiElement.getAttribute("data-node-id");
         if (currentLiElement.nextElementSibling) {
-            currentLiElement.nextElementSibling.classList.add("b3-list-item--focus");
+            newId = currentLiElement.nextElementSibling.getAttribute("data-node-id");
         } else if (currentLiElement.previousElementSibling) {
-            currentLiElement.previousElementSibling.classList.add("b3-list-item--focus");
+            newId = currentLiElement.previousElementSibling.getAttribute("data-node-id");
         }
-        if (config.group === 1) {
-            if (currentLiElement.nextElementSibling || currentLiElement.previousElementSibling) {
-                currentLiElement.remove();
-            } else {
-                const nextDocElement = currentLiElement.parentElement.nextElementSibling || currentLiElement.parentElement.previousElementSibling.previousElementSibling?.previousElementSibling;
-                if (nextDocElement) {
-                    nextDocElement.nextElementSibling.firstElementChild.classList.add("b3-list-item--focus");
-                    nextDocElement.nextElementSibling.classList.remove("fn__none");
-                    nextDocElement.firstElementChild.firstElementChild.classList.add("b3-list-item__arrow--open");
-                }
-                currentLiElement.parentElement.previousElementSibling.remove();
-                currentLiElement.parentElement.remove();
+        if (config.group === 1 && !newId) {
+            const nextDocElement = currentLiElement.parentElement.nextElementSibling || currentLiElement.parentElement.previousElementSibling.previousElementSibling?.previousElementSibling;
+            if (nextDocElement) {
+                newId = nextDocElement.nextElementSibling.firstElementChild.getAttribute("data-node-id");
             }
-        } else {
-            currentLiElement.remove();
         }
-        currentLiElement = searchListElement.querySelector(".b3-list-item--focus");
-        if (!currentLiElement) {
-            searchListElement.innerHTML = `<div class="b3-list--empty">${window.siyuan.languages.emptyContent}</div>`;
-            return;
-        }
-        if (searchListElement.scrollTop < currentLiElement.offsetTop - searchListElement.clientHeight + 30 ||
-            searchListElement.scrollTop > currentLiElement.offsetTop) {
-            searchListElement.scrollTop = currentLiElement.offsetTop - searchListElement.clientHeight + 30;
-        }
+        updateSearchResult(config, element, false, {
+            currentId,
+            newId
+        });
     });
 };
 
-const updateConfig = (element: Element, newConfig: ISearchOption, config: ISearchOption) => {
+const updateConfig = (element: Element, newConfig: Config.IUILayoutTabSearchConfig, config: Config.IUILayoutTabSearchConfig,
+                      clear = false) => {
     if (config.hasReplace !== newConfig.hasReplace) {
         if (newConfig.hasReplace) {
             element.querySelector('[data-type="toggle-replace"]').classList.add("toolbar__icon--active");
@@ -118,7 +114,7 @@ const updateConfig = (element: Element, newConfig: ISearchOption, config: ISearc
     const searchPathElement = element.querySelector("#searchPath");
     if (newConfig.hPath) {
         searchPathElement.classList.remove("fn__none");
-        searchPathElement.innerHTML = `<div class="b3-chip b3-chip--middle">${escapeHtml(newConfig.hPath)}<svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconCloseRound"></use></svg></div>`;
+        searchPathElement.innerHTML = `<div class="b3-chip b3-chip--middle">${escapeHtml(newConfig.hPath)}<svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconClose"></use></svg></div>`;
     } else {
         searchPathElement.classList.add("fn__none");
     }
@@ -152,44 +148,73 @@ const updateConfig = (element: Element, newConfig: ISearchOption, config: ISearc
     } else {
         searchIncludeElement.setAttribute("disabled", "disabled");
     }
-    (document.querySelector("#toolbarSearch") as HTMLInputElement).value = newConfig.k;
+    if (newConfig.k || clear) {
+        (document.querySelector("#toolbarSearch") as HTMLInputElement).value = newConfig.k;
+    }
     (element.querySelector("#toolbarReplace") as HTMLInputElement).value = newConfig.r;
-    Object.assign(config, newConfig);
+    config = JSON.parse(JSON.stringify(newConfig));
     window.siyuan.storage[Constants.LOCAL_SEARCHDATA] = Object.assign({}, config);
     setStorageVal(Constants.LOCAL_SEARCHDATA, window.siyuan.storage[Constants.LOCAL_SEARCHDATA]);
     updateSearchResult(config, element);
     window.siyuan.menus.menu.remove();
+    return config;
 };
 
-const onRecentBlocks = (data: IBlock[], config: ISearchOption, response?: IWebSocketData) => {
+const onRecentBlocks = (data: IBlock[], config: Config.IUILayoutTabSearchConfig,
+                        response?: IWebSocketData, focusId?: {
+        currentId?: string,
+        newId?: string
+    }) => {
     const listElement = document.querySelector("#searchList");
     let resultHTML = "";
-    data.forEach((item: IBlock, index: number) => {
+    let currentData;
+    let newData;
+    data.forEach((item: IBlock) => {
         const title = getNotebookName(item.box) + getDisplayName(item.hPath, false);
         if (item.children) {
             resultHTML += `<div class="b3-list-item">
 <span class="b3-list-item__toggle b3-list-item__toggle--hl">
     <svg class="b3-list-item__arrow b3-list-item__arrow--open"><use xlink:href="#iconRight"></use></svg>
 </span>
-${unicode2Emoji(getNotebookIcon(item.box) || Constants.SIYUAN_IMAGE_NOTE, "b3-list-item__graphic", true)}
-<span class="b3-list-item__text" style="color: var(--b3-theme-on-surface)">${escapeGreat(title)}</span>
+${unicode2Emoji(getNotebookIcon(item.box) || window.siyuan.storage[Constants.LOCAL_IMAGES].note, "b3-list-item__graphic", true)}
+<span class="b3-list-item__text" style="color: var(--b3-theme-on-surface)">${escapeHtml(title)}</span>
 </div><div>`;
-            item.children.forEach((childItem, childIndex) => {
-                resultHTML += `<div style="padding-left: 36px" data-type="search-item" class="b3-list-item${childIndex === 0 && index === 0 ? " b3-list-item--focus" : ""}" data-node-id="${childItem.id}">
+            item.children.forEach((childItem) => {
+                if (focusId) {
+                    if (childItem.id === focusId.currentId) {
+                        currentData = childItem;
+                    }
+                    if (childItem.id === focusId.newId) {
+                        newData = childItem;
+                    }
+                }
+                resultHTML += `<div style="padding-left: 36px" data-type="search-item" class="b3-list-item" data-node-id="${childItem.id}">
 <svg class="b3-list-item__graphic"><use xlink:href="#${getIconByType(childItem.type)}"></use></svg>
 ${unicode2Emoji(childItem.ial.icon, "b3-list-item__graphic", true)}
 <span class="b3-list-item__text">${childItem.content}</span>
+${childItem.tag ? `<span class="b3-list-item__meta b3-list-item__meta--ellipsis">${childItem.tag.replace(/#/g, "")}</span>` : ""}
 </div>`;
             });
             resultHTML += "</div>";
         } else {
-            resultHTML += `<div class="b3-list-item b3-list-item--two${index === 0 ? " b3-list-item--focus" : ""}" data-type="search-item" data-node-id="${item.id}">
-<div class="b3-list-item__first">
-    <svg class="b3-list-item__graphic"><use xlink:href="#${getIconByType(item.type)}"></use></svg>
-    ${unicode2Emoji(item.ial.icon, "b3-list-item__graphic", true)}
-    <span class="b3-list-item__text">${item.content}</span>
-</div>
-<span class="b3-list-item__text b3-list-item__meta">${escapeGreat(title)}</span>
+            if (focusId) {
+                if (item.id === focusId.currentId) {
+                    currentData = item;
+                }
+                if (item.id === focusId.newId) {
+                    newData = item;
+                }
+            }
+            resultHTML += `<div class="b3-list-item b3-list-item--two" data-type="search-item" data-node-id="${item.id}">
+    <div class="b3-list-item__first">
+        <svg class="b3-list-item__graphic"><use xlink:href="#${getIconByType(item.type)}"></use></svg>
+        ${unicode2Emoji(item.ial.icon, "b3-list-item__graphic", true)}
+        <span class="b3-list-item__text">${item.content}</span>
+    </div>
+    <div class="fn__flex">
+        ${item.tag ? `<span class="b3-list-item__meta b3-list-item__meta--ellipsis">${item.tag.replace(/#/g, "")}</span><span class="fn__space"></span>` : ""}
+        <span class="b3-list-item__text b3-list-item__meta">${escapeHtml(title)}</span>
+    </div>
 </div>`;
         }
     });
@@ -202,64 +227,131 @@ ${unicode2Emoji(childItem.ial.icon, "b3-list-item__graphic", true)}
 </div>`;
     listElement.scrollTop = 0;
     let countHTML = "";
-    if (response) {
-        countHTML = `<span class="fn__flex-center">${window.siyuan.languages.findInDoc.replace("${x}", response.data.matchedRootCount).replace("${y}", response.data.matchedBlockCount)}</span>
+    if (response && response.data.matchedBlockCount > 0) {
+        let text = window.siyuan.languages.findInDoc.replace("${x}", response.data.matchedRootCount).replace("${y}", response.data.matchedBlockCount);
+        if (response.data.docMode) {
+            text = window.siyuan.languages.matchDoc.replace("${x}", response.data.matchedRootCount);
+        }
+        countHTML = `<span class="fn__flex-center">${text}</span>
 <span class="fn__flex-1"></span>
 <span class="fn__flex-center">${config.page}/${response.data.pageCount || 1}</span>`;
     }
     listElement.previousElementSibling.querySelector('[data-type="result"]').innerHTML = countHTML;
+    if (!currentData) {
+        currentData = newData;
+    }
+    if (!currentData && data.length > 0) {
+        if (data[0].children) {
+            currentData = data[0].children[0];
+        } else {
+            currentData = data[0];
+        }
+    }
+    if (currentData) {
+        const currentList = listElement.querySelector(`[data-node-id="${currentData.id}"]`) as HTMLElement;
+        if (currentList) {
+            currentList.classList.add("b3-list-item--focus");
+            currentList.scrollIntoView();
+        }
+    }
 };
 
-let toolbarSearchTimeout = 0;
-export const updateSearchResult = (config: ISearchOption, element: Element, rmCurrentCriteria = false) => {
-    clearTimeout(toolbarSearchTimeout);
-    toolbarSearchTimeout = window.setTimeout(() => {
-        if (rmCurrentCriteria) {
-            element.querySelector("#criteria .b3-chip--current")?.classList.remove("b3-chip--current");
-        }
-        const loadingElement = element.querySelector(".fn__loading--top");
-        loadingElement.classList.remove("fn__none");
-        const previousElement = element.querySelector('[data-type="previous"]');
-        const nextElement = element.querySelector('[data-type="next"]');
-        const inputElement = document.getElementById("toolbarSearch") as HTMLInputElement;
-        if (inputElement.value === "" && (!config.idPath || config.idPath.length === 0)) {
-            fetchPost("/api/block/getRecentUpdatedBlocks", {}, (response) => {
-                onRecentBlocks(response.data, config);
+export const updateSearchResult = (config: Config.IUILayoutTabSearchConfig, element: Element, rmCurrentCriteria = false,
+                                   focusId?: {
+                                       currentId?: string,
+                                       newId?: string
+                                   }) => {
+    if (rmCurrentCriteria) {
+        element.querySelector("#criteria .b3-chip--current")?.classList.remove("b3-chip--current");
+        element.querySelector("#searchList").innerHTML = "";
+        element.querySelector('[data-type="result"]').innerHTML = "";
+        element.querySelector('[data-type="previous"]').setAttribute("disabled", "disabled");
+        element.querySelector('[data-type="next"]').setAttribute("disabled", "disabled");
+    }
+    const loadingElement = element.querySelector(".fn__loading") as HTMLElement;
+    loadingElement.classList.remove("fn__none");
+    scheduleSearchRequest({
+        element,
+        delay: Constants.TIMEOUT_INPUT,
+        onIdle: () => {
+            if (element.isConnected) {
                 loadingElement.classList.add("fn__none");
-                previousElement.setAttribute("disabled", "true");
-                nextElement.setAttribute("disabled", "true");
-            });
-        } else {
+            }
+        },
+        createTask(version) {
+            loadingElement.style.top = element.querySelector(".b3-list--background").getBoundingClientRect().top + "px";
+            const previousElement = element.querySelector('[data-type="previous"]');
+            const nextElement = element.querySelector('[data-type="next"]');
+            const inputElement = document.getElementById("toolbarSearch") as HTMLInputElement;
+            config.query = inputElement.value;
             if (!config.page) {
                 config.page = 1;
             }
-            if (config.page > 1) {
+            const requestConfig = JSON.parse(JSON.stringify(config)) as Config.IUILayoutTabSearchConfig;
+            const requestFocusId = focusId ? Object.assign({}, focusId) : undefined;
+            if (requestConfig.query === "" && (!requestConfig.idPath || requestConfig.idPath.length === 0)) {
+                return {
+                    method: requestConfig.method,
+                    version,
+                    run(signal: AbortSignal, isCurrent: () => boolean) {
+                        return fetchPost("/api/block/getRecentUpdatedBlocks", {}, (response) => {
+                            if (!isCurrent()) {
+                                return;
+                            }
+                            onRecentBlocks(response.data, requestConfig, undefined, requestFocusId);
+                            previousElement.setAttribute("disabled", "true");
+                            nextElement.setAttribute("disabled", "true");
+                        }, undefined, undefined, signal);
+                    }
+                };
+            }
+            if (requestConfig.page > 1) {
                 previousElement.removeAttribute("disabled");
             } else {
                 previousElement.setAttribute("disabled", "disabled");
             }
-            fetchPost("/api/search/fullTextSearchBlock", {
-                query: inputElement.value,
-                method: config.method,
-                types: config.types,
-                paths: config.idPath || [],
-                groupBy: config.group,
-                orderBy: config.sort,
-                page: config.page,
-            }, (response) => {
-                onRecentBlocks(response.data.blocks, config, response);
-                loadingElement.classList.add("fn__none");
-                if (config.page < response.data.pageCount) {
-                    nextElement.removeAttribute("disabled");
-                } else {
-                    nextElement.setAttribute("disabled", "disabled");
+            const endpoint = requestConfig.method === 4 ? "/api/search/semanticSearchBlock" : "/api/search/fullTextSearchBlock";
+            const searchParam: Record<string, any> = {
+                query: requestConfig.query,
+                method: requestConfig.method,
+                types: requestConfig.types,
+                subTypes: requestConfig.subTypes,
+                paths: requestConfig.idPath || [],
+                groupBy: requestConfig.group,
+                orderBy: requestConfig.sort,
+                page: requestConfig.page,
+                pageSize: 32,
+            };
+            // 限定在单个加密 box 内搜索时带 notebook，让内核走加密 db；跨 box 或全局搜索走原函数
+            const idPaths = requestConfig.idPath || [];
+            if (idPaths.length > 0) {
+                const box = idPaths[0].split("/")[0];
+                if (isEncryptedBox(box) && idPaths.every(p => p.split("/")[0] === box)) {
+                    searchParam.notebook = box;
                 }
-            });
+            }
+            return {
+                method: requestConfig.method,
+                version,
+                run(signal: AbortSignal, isCurrent: () => boolean) {
+                    return fetchPost(endpoint, searchParam, (response) => {
+                        if (!isCurrent()) {
+                            return;
+                        }
+                        onRecentBlocks(response.data.blocks, requestConfig, response, requestFocusId);
+                        if (requestConfig.page < response.data.pageCount) {
+                            nextElement.removeAttribute("disabled");
+                        } else {
+                            nextElement.setAttribute("disabled", "disabled");
+                        }
+                    }, undefined, undefined, signal);
+                }
+            };
         }
-    }, Constants.TIMEOUT_INPUT);
+    });
 };
 
-const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
+const initSearchEvent = (app: App, element: Element, config: Config.IUILayoutTabSearchConfig) => {
     const searchInputElement = document.getElementById("toolbarSearch") as HTMLInputElement;
     searchInputElement.value = config.k || "";
     searchInputElement.addEventListener("compositionend", (event: InputEvent) => {
@@ -282,13 +374,14 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
             window.siyuan.storage[Constants.LOCAL_SEARCHDATA] = Object.assign({}, config);
             setStorageVal(Constants.LOCAL_SEARCHDATA, window.siyuan.storage[Constants.LOCAL_SEARCHDATA]);
         }
+        saveKeyList("keys", searchInputElement.value, config);
     });
     addClearButton({
         inputElement: searchInputElement,
         className: "toolbar__icon",
         clearCB() {
             config.page = 1;
-            updateSearchResult(config, element);
+            updateSearchResult(config, element, true);
         }
     });
     const replaceInputElement = element.querySelector(".toolbar .toolbar__title") as HTMLInputElement;
@@ -297,17 +390,29 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
         inputElement: replaceInputElement,
         className: "toolbar__icon",
     });
-    const criteriaData: ISearchOption[] = [];
+    const criteriaData: Config.IUILayoutTabSearchConfig[] = [];
     initCriteriaMenu(element.querySelector("#criteria"), criteriaData, config);
 
     const assetsElement = document.querySelector("#searchAssetsPanel");
+    const unRefElement = document.querySelector("#searchUnRefPanel");
     const searchListElement = element.querySelector("#searchList") as HTMLElement;
     const localSearch = window.siyuan.storage[Constants.LOCAL_SEARCHASSET] as ISearchAssetOption;
-    element.addEventListener("click", (event: MouseEvent) => {
+    const searchPanelElement = element.firstElementChild as HTMLElement;
+    searchPanelElement.addEventListener("click", (event: MouseEvent) => {
         let target = event.target as HTMLElement;
-        while (target && !target.isSameNode(element)) {
+        while (target && target !== searchPanelElement) {
             const type = target.getAttribute("data-type");
-            if (type === "previous") {
+            if (type === "replaceHistory") {
+                toggleReplaceHistory(target.nextElementSibling as HTMLInputElement);
+                event.stopPropagation();
+                event.preventDefault();
+                break;
+            } else if (type === "assetHistory") {
+                toggleAssetHistory(assetsElement);
+                event.stopPropagation();
+                event.preventDefault();
+                break;
+            } else if (type === "previous") {
                 if (!target.getAttribute("disabled")) {
                     config.page--;
                     updateSearchResult(config, element);
@@ -329,7 +434,7 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                 target.classList.add("b3-chip--current");
                 criteriaData.find(item => {
                     if (item.name === target.innerText.trim()) {
-                        updateConfig(element, item, config);
+                        item = updateConfig(element, item, config);
                         return true;
                     }
                 });
@@ -345,6 +450,23 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                         return true;
                     }
                 });
+                if (target.parentElement.classList.contains("b3-chip--current")) {
+                    config = updateConfig(element, {
+                        removed: true,
+                        sort: 0,
+                        group: 0,
+                        hasReplace: false,
+                        method: 0,
+                        hPath: "",
+                        idPath: [],
+                        k: "",
+                        r: "",
+                        page: 1,
+                        types: getDefaultType(),
+                        subTypes: getDefaultSubType(),
+                        replaceTypes: Object.assign({}, Constants.SIYUAN_DEFAULT_REPLACETYPES),
+                    }, config, true);
+                }
                 if (target.parentElement.parentElement.childElementCount === 1) {
                     target.parentElement.parentElement.classList.add("fn__none");
                 }
@@ -387,11 +509,14 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
             } else if (type === "currentPath" && !target.hasAttribute("disabled")) {
                 const editProtyle = getCurrentEditor().protyle;
                 fetchPost("/api/filetree/getHPathsByPaths", {paths: [editProtyle.path]}, (response) => {
+                    if (!Array.isArray(response.data) || typeof response.data[0] !== "string") {
+                        return;
+                    }
                     config.idPath = [pathPosix().join(editProtyle.notebookId, editProtyle.path)];
                     config.hPath = response.data[0];
                     const searchPathElement = element.querySelector("#searchPath");
                     searchPathElement.classList.remove("fn__none");
-                    searchPathElement.innerHTML = `<div class="b3-chip b3-chip--middle">${escapeHtml(config.hPath)}<svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconCloseRound"></use></svg></div>`;
+                    searchPathElement.innerHTML = `<div class="b3-chip b3-chip--middle">${escapeHtml(config.hPath)}<svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconClose"></use></svg></div>`;
 
                     const includeElement = element.querySelector('[data-type="include"]');
                     includeElement.classList.remove("toolbar__icon--active");
@@ -403,40 +528,44 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                 event.preventDefault();
                 break;
             } else if (type === "path") {
-                movePathTo((toPath, toNotebook) => {
-                    fetchPost("/api/filetree/getHPathsByPaths", {paths: toPath}, (response) => {
-                        config.idPath = [];
-                        const hPathList: string[] = [];
-                        let enableIncludeChild = false;
-                        toPath.forEach((item, index) => {
-                            if (item === "/") {
-                                config.idPath.push(toNotebook[index]);
-                                hPathList.push(getNotebookName(toNotebook[index]));
-                            } else {
-                                enableIncludeChild = true;
-                                config.idPath.push(pathPosix().join(toNotebook[index], item.replace(".sy", "")));
+                movePathTo({
+                    cb: (toPath, toNotebook) => {
+                        fetchPost("/api/filetree/getHPathsByPaths", {paths: toPath}, (response) => {
+                            config.idPath = [];
+                            const hPathList: string[] = [];
+                            let enableIncludeChild = false;
+                            toPath.forEach((item, index) => {
+                                if (item === "/") {
+                                    config.idPath.push(toNotebook[index]);
+                                    hPathList.push(getNotebookName(toNotebook[index]));
+                                } else {
+                                    enableIncludeChild = true;
+                                    config.idPath.push(pathPosix().join(toNotebook[index], item.replace(".sy", "")));
+                                }
+                            });
+                            if (response.data) {
+                                hPathList.push(...response.data);
                             }
+                            config.hPath = hPathList.join(" ");
+
+                            const searchPathElement = element.querySelector("#searchPath");
+                            searchPathElement.classList.remove("fn__none");
+                            searchPathElement.innerHTML = `<div class="b3-chip b3-chip--middle">${escapeHtml(config.hPath)}<svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconClose"></use></svg></div>`;
+
+                            const includeElement = element.querySelector('[data-type="include"]');
+                            includeElement.classList.add("toolbar__icon--active");
+                            if (enableIncludeChild) {
+                                includeElement.removeAttribute("disabled");
+                            } else {
+                                includeElement.setAttribute("disabled", "disabled");
+                            }
+                            config.page = 1;
+                            updateSearchResult(config, element, true);
                         });
-                        if (response.data) {
-                            hPathList.push(...response.data);
-                        }
-                        config.hPath = hPathList.join(" ");
-
-                        const searchPathElement = element.querySelector("#searchPath");
-                        searchPathElement.classList.remove("fn__none");
-                        searchPathElement.innerHTML = `<div class="b3-chip b3-chip--middle">${escapeHtml(config.hPath)}<svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconCloseRound"></use></svg></div>`;
-
-                        const includeElement = element.querySelector('[data-type="include"]');
-                        includeElement.classList.add("toolbar__icon--active");
-                        if (enableIncludeChild) {
-                            includeElement.removeAttribute("disabled");
-                        } else {
-                            includeElement.setAttribute("disabled", "disabled");
-                        }
-                        config.page = 1;
-                        updateSearchResult(config, element, true);
-                    });
-                }, [], undefined, window.siyuan.languages.specifyPath);
+                    },
+                    flashcard: false,
+                    title: window.siyuan.languages.specifyPath
+                });
                 event.stopPropagation();
                 event.preventDefault();
                 break;
@@ -472,7 +601,7 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                     config.page = 1;
                     updateSearchResult(config, element, true);
                 }, () => {
-                    updateConfig(element, {
+                    config = updateConfig(element, {
                         removed: true,
                         sort: 0,
                         group: 0,
@@ -483,23 +612,11 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                         k: "",
                         r: "",
                         page: 1,
-                        types: {
-                            document: window.siyuan.config.search.document,
-                            heading: window.siyuan.config.search.heading,
-                            list: window.siyuan.config.search.list,
-                            listItem: window.siyuan.config.search.listItem,
-                            codeBlock: window.siyuan.config.search.codeBlock,
-                            htmlBlock: window.siyuan.config.search.htmlBlock,
-                            mathBlock: window.siyuan.config.search.mathBlock,
-                            table: window.siyuan.config.search.table,
-                            blockquote: window.siyuan.config.search.blockquote,
-                            superBlock: window.siyuan.config.search.superBlock,
-                            paragraph: window.siyuan.config.search.paragraph,
-                            embedBlock: window.siyuan.config.search.embedBlock,
-                            databaseBlock: window.siyuan.config.search.databaseBlock,
-                        },
+                        types: getDefaultType(),
+                        subTypes: getDefaultSubType(),
                         replaceTypes: Object.assign({}, Constants.SIYUAN_DEFAULT_REPLACETYPES),
-                    }, config);
+                    }, config, true);
+                    element.querySelector("#criteria .b3-chip--current")?.classList.remove("b3-chip--current");
                 });
                 window.siyuan.menus.menu.fullscreen();
                 event.stopPropagation();
@@ -507,6 +624,32 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                 break;
             } else if (type === "replace-all") {
                 replace(element, config, true);
+                event.stopPropagation();
+                event.preventDefault();
+                break;
+            } else if (type === "refreshUnRef") {
+                getUnRefListMobile(unRefElement);
+                event.stopPropagation();
+                event.preventDefault();
+                break;
+            } else if (type === "unRefPrevious") {
+                if (!target.getAttribute("disabled")) {
+                    let currentPage = parseInt(unRefElement.querySelector("#searchUnRefResult").lastElementChild.textContent);
+                    if (currentPage > 1) {
+                        currentPage--;
+                        getUnRefListMobile(unRefElement, currentPage);
+                    }
+                }
+                event.stopPropagation();
+                event.preventDefault();
+                break;
+            } else if (type === "unRefNext") {
+                const unRefRageElement = unRefElement.querySelector("#searchUnRefResult").lastElementChild;
+                let currentPage = parseInt(unRefRageElement.textContent);
+                if (currentPage < parseInt(unRefRageElement.textContent.split("/")[1])) {
+                    currentPage++;
+                    getUnRefListMobile(unRefElement, currentPage);
+                }
                 event.stopPropagation();
                 event.preventDefault();
                 break;
@@ -538,6 +681,7 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                 break;
             } else if (type === "goSearch") {
                 assetsElement.classList.add("fn__none");
+                unRefElement.classList.add("fn__none");
                 event.stopPropagation();
                 event.preventDefault();
                 break;
@@ -568,7 +712,7 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                 break;
             } else if (target.classList.contains("b3-list-item")) {
                 if (target.getAttribute("data-type") === "search-new") {
-                    newFileByName(app, searchInputElement.value);
+                    newFile(app, searchInputElement.value);
                 } else if (target.getAttribute("data-type") === "search-item") {
                     const id = target.getAttribute("data-node-id");
                     if (id) {
@@ -576,7 +720,7 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
                             preventScroll(window.siyuan.mobile.editor.protyle);
                         }
                         checkFold(id, (zoomIn) => {
-                            openMobileFileById(app, id, zoomIn ? [Constants.CB_GET_ALL, Constants.CB_GET_HL] : [Constants.CB_GET_HL, Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]);
+                            openMobileFileById(app, id, zoomIn ? [Constants.CB_GET_ALL] : [Constants.CB_GET_HL, Constants.CB_GET_CONTEXT, Constants.CB_GET_ROOTSCROLL]);
                         });
                         closePanel();
                     } else {
@@ -601,9 +745,31 @@ const initSearchEvent = (app: App, element: Element, config: ISearchOption) => {
     }, false);
 };
 
-export const popSearch = (app: App, config = window.siyuan.storage[Constants.LOCAL_SEARCHDATA] as ISearchOption) => {
+export const popSearch = (app: App, searchConfig?: Config.IUILayoutTabSearchConfig) => {
+    const config: Config.IUILayoutTabSearchConfig = JSON.parse(JSON.stringify(window.siyuan.storage[Constants.LOCAL_SEARCHDATA]));
+    const currentEditor = getCurrentEditor();
+    if (currentEditor && isEncryptedBox(currentEditor.protyle.notebookId)) {
+        config.sensitive = true;
+    }
+    if (config.method === 4 && !window.siyuan.config.ai.embedding.enabled) {
+        config.method = 0;
+    }
+    const rangeText = (currentEditor?.protyle.toolbar.range ||
+        (getSelection().rangeCount > 0 ? getSelection().getRangeAt(0) : document.createRange())).toString();
+    if (rangeText) {
+        config.k = rangeText;
+    }
+    if (searchConfig) {
+        Object.keys(searchConfig).forEach((key: keyof Config.IUILayoutTabSearchConfig) => {
+            if (key === "idPath") {
+                config[key] = [...searchConfig[key]];
+            } else {
+                config[key as "r"] = searchConfig[key as "r"];
+            }
+        });
+    }
+
     activeBlur();
-    hideKeyboardToolbar();
     let includeChild = true;
     let enableIncludeChild = false;
     config.idPath.forEach(item => {
@@ -617,13 +783,19 @@ export const popSearch = (app: App, config = window.siyuan.storage[Constants.LOC
 
     openModel({
         title: `<div class="fn__flex">
-    <input id="toolbarSearch" placeholder="${window.siyuan.languages.showRecentUpdatedBlocks}" class="toolbar__title fn__block">
+    <span data-menu="true" class="toolbar__icon toolbar__icon--history" data-type="history">
+        <svg class="svg--mid"><use xlink:href="#iconSearch"></use></svg>
+        <svg class="svg--smaller"><use xlink:href="#iconDown"></use></svg>
+    </span>
+    <input id="toolbarSearch" placeholder="${window.siyuan.languages.showRecentUpdatedBlocks}" class="toolbar__title fn__block" autocomplete="off" autocorrect="off" spellcheck="false">
     <svg id="toolbarSearchNew" class="toolbar__icon"><use xlink:href="#iconFile"></use></svg>
 </div>`,
-        icon: "iconSearch",
         html: `<div class="fn__flex-column" style="height: 100%">
     <div class="toolbar toolbar--border${config.hasReplace ? "" : " fn__none"}">
-        <svg class="toolbar__icon"><use xlink:href="#iconReplace"></use></svg>
+        <span data-menu="true" class="toolbar__icon toolbar__icon--history" data-type="replaceHistory">
+            <svg class="svg--mid"><use xlink:href="#iconReplace"></use></svg>
+            <svg class="svg--smaller"><use xlink:href="#iconDown"></use></svg>
+        </span>
         <input id="toolbarReplace" class="toolbar__title">
         <svg class="fn__rotate fn__none toolbar__icon"><use xlink:href="#iconRefresh"></use></svg>
         <div class="fn__space"></div>
@@ -644,13 +816,13 @@ export const popSearch = (app: App, config = window.siyuan.storage[Constants.LOC
     <div id="searchPath" class="b3-chips${config.hPath ? "" : " fn__none"}" style="background-color: var(--b3-theme-background);">
         <div class="b3-chip b3-chip--middle">
             ${escapeHtml(config.hPath)}
-            <svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconCloseRound"></use></svg>
+            <svg data-type="remove-path" class="b3-chip__close"><use xlink:href="#iconClose"></use></svg>
         </div>
     </div>
     <div class="toolbar">
         <span class="fn__flex-1"></span>
         <svg data-type="toggle-replace" class="toolbar__icon${config.hasReplace ? " toolbar__icon--active" : ""}"><use xlink:href="#iconReplace"></use></svg>
-        <svg ${enableIncludeChild ? "" : "disabled"} data-type="include" class="toolbar__icon${includeChild ? " toolbar__icon--active" : ""}"><use xlink:href="#iconCopy"></use></svg>
+        <svg ${enableIncludeChild ? "" : "disabled"} data-type="include" class="toolbar__icon${includeChild ? " toolbar__icon--active" : ""}"><use xlink:href="#iconInclude"></use></svg>
         <svg data-type="path" class="toolbar__icon"><use xlink:href="#iconFolder"></use></svg>
         <svg ${document.querySelector("#empty").classList.contains("fn__none") ? "" : "disabled"} data-type="currentPath" class="toolbar__icon"><use xlink:href="#iconFocus"></use></svg>
         <svg data-type="expand" class="toolbar__icon${config.group === 0 ? " fn__none" : ""}"><use xlink:href="#iconExpand"></use></svg>
@@ -661,7 +833,10 @@ export const popSearch = (app: App, config = window.siyuan.storage[Constants.LOC
      </div>
      <div class="fn__none fn__flex-column" style="position: fixed;top: 0;width: 100%;background: var(--b3-theme-surface);height: 100%;" id="searchAssetsPanel">
         <div class="toolbar toolbar--border">
-            <svg class="toolbar__icon"><use xlink:href="#iconSearch"></use></svg>
+           <span data-menu="true" class="toolbar__icon toolbar__icon--history" data-type="assetHistory">
+                <svg class="svg--mid"><use xlink:href="#iconSearch"></use></svg>
+                <svg class="svg--smaller"><use xlink:href="#iconDown"></use></svg>
+            </span>
             <input id="searchAssetInput" placeholder="${window.siyuan.languages.keyword}" class="toolbar__title fn__block">
         </div>
         <div class="toolbar">
@@ -682,13 +857,36 @@ export const popSearch = (app: App, config = window.siyuan.storage[Constants.LOC
             <span class="fn__flex-1"></span>
          </div>
     </div>
-     <div class="fn__loading fn__loading--top"><img width="120px" src="/stage/loading-pure.svg"></div>
+     <div class="fn__none fn__flex-column" style="position: fixed;top: 0;width: 100%;background: var(--b3-theme-surface);height: 100%;" id="searchUnRefPanel">
+        <div class="toolbar">
+            <span class="fn__space"></span>
+            <span id="searchUnRefResult" class="fn__flex-1 fn__flex"></span>
+            <span class="fn__space"></span>
+            <svg data-type="unRefPrevious" disabled="disabled" class="toolbar__icon"><use xlink:href="#iconLeft"></use></svg>
+            <svg data-type="unRefNext" disabled="disabled" class="toolbar__icon"><use xlink:href="#iconRight"></use></svg>
+        </div>
+        <div id="searchUnRefList" style="overflow:auto;" class="fn__flex-1 b3-list b3-list--background"></div>
+        <div class="toolbar">
+            <span class="fn__flex-1"></span>
+            <svg data-type="refreshUnRef" class="toolbar__icon"><use xlink:href="#iconRefresh"></use></svg>
+            <svg data-type="goSearch" class="toolbar__icon"><use xlink:href="#iconBack"></use></svg>
+            <span class="fn__flex-1"></span>
+         </div>
+    </div>
+     <div class="fn__loading"><img width="120px" src="/stage/loading-pure.svg"></div>
 </div>`,
+        destroyCallback() {
+            cancelSearchRequest(document.getElementById("modelMain"));
+        },
         bindEvent(element) {
             document.querySelector("#toolbarSearchNew").addEventListener("click", () => {
-                newFileByName(app, (document.querySelector("#toolbarSearch") as HTMLInputElement).value);
+                newFile(app, (document.querySelector("#toolbarSearch") as HTMLInputElement).value);
             });
-            initSearchEvent(app, element.firstElementChild, config);
+            const historyElement = document.querySelector('.toolbar [data-type="history"]');
+            historyElement.addEventListener("click", () => {
+                toggleSearchHistory(document.querySelector("#model"), config, undefined, element);
+            });
+            initSearchEvent(app, element, config);
             updateSearchResult(config, element);
         }
     });
@@ -716,6 +914,9 @@ const goAsset = () => {
         }
         assetInputEvent(assetsElement, localSearch);
     });
+    inputElement.addEventListener("blur", () => {
+        saveAssetKeyList(inputElement);
+    });
     assetInputEvent(assetsElement, localSearch);
     addClearButton({
         inputElement,
@@ -723,5 +924,54 @@ const goAsset = () => {
         clearCB() {
             assetInputEvent(assetsElement, localSearch);
         }
+    });
+};
+
+export const goUnRef = () => {
+    window.siyuan.menus.menu.remove();
+    const unRefElement = document.querySelector("#searchUnRefPanel");
+    unRefElement.classList.remove("fn__none");
+    const listElement = unRefElement.querySelector("#searchUnRefList");
+    if (listElement.innerHTML) {
+        return;
+    }
+    getUnRefListMobile(unRefElement);
+};
+
+const getUnRefListMobile = (element: Element, page = 1) => {
+    const previousElement = element.querySelector('[data-type="unRefPrevious"]');
+    if (page > 1) {
+        previousElement.removeAttribute("disabled");
+    } else {
+        previousElement.setAttribute("disabled", "disabled");
+    }
+    fetchPost("/api/search/listInvalidBlockRefs", {
+        page,
+    }, (response) => {
+        element.parentElement.querySelector(".fn__loading").classList.add("fn__none");
+        const nextElement = element.querySelector('[data-type="unRefNext"]');
+        if (page < response.data.pageCount) {
+            nextElement.removeAttribute("disabled");
+        } else {
+            nextElement.setAttribute("disabled", "disabled");
+        }
+        let resultHTML = "";
+        response.data.blocks.forEach((item: IBlock, index: number) => {
+            const title = escapeHtml(getNotebookName(item.box)) + getDisplayName(item.hPath, false);
+            resultHTML += `<div class="b3-list-item b3-list-item--two${index === 0 ? " b3-list-item--focus" : ""}" data-type="search-item" data-node-id="${item.id}">
+<div class="b3-list-item__first">
+    <svg class="b3-list-item__graphic"><use xlink:href="#${getIconByType(item.type)}"></use></svg>
+    ${unicode2Emoji(item.ial.icon, "b3-list-item__graphic", true)}
+    <span class="b3-list-item__text">${item.content}</span>
+</div>
+<span class="b3-list-item__text b3-list-item__meta">${title}</span>
+</div>`;
+        });
+        element.querySelector("#searchUnRefResult").innerHTML = `<span class="fn__flex-center">${window.siyuan.languages.findInDoc.replace("${x}", response.data.matchedRootCount).replace("${y}", response.data.matchedBlockCount)}</span>
+<span class="fn__flex-1"></span>
+<span class="fn__flex-center">${page}/${response.data.pageCount || 1}</span>`;
+        element.querySelector("#searchUnRefList").innerHTML = resultHTML || `<div class="search__empty">
+    ${window.siyuan.languages.emptyContent}
+</div>`;
     });
 };

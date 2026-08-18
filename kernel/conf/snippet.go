@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -29,9 +29,10 @@ func NewSnpt() *Snpt {
 }
 
 type Snippet struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Type    string `json:"type"` // js/css
-	Enabled bool   `json:"enabled"`
-	Content string `json:"content"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Type              string `json:"type"` // js/css
+	Enabled           bool   `json:"enabled"`
+	DisabledInPublish bool   `json:"disabledInPublish"`
+	Content           string `json:"content"`
 }

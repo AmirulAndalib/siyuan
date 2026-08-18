@@ -1,9 +1,9 @@
 import {Constants} from "../constants";
 import {Hint} from "./hint";
-import {setLute} from "./render/setLute";
+import {getLute} from "./render/setLute";
 import {Preview} from "./preview";
 import {addLoading, initUI, removeLoading} from "./ui/initUI";
-import {Undo} from "./undo";
+import {LocalUndo, Undo} from "./undo";
 import {Upload} from "./upload";
 import {Options} from "./util/Options";
 import {destroy} from "./util/destroy";
@@ -17,30 +17,41 @@ import {Breadcrumb} from "./breadcrumb";
 import {
     onTransaction,
     transaction,
-    turnsIntoOneTransaction, turnsIntoTransaction,
+    turnsIntoOneTransaction,
+    turnsIntoTransaction,
     updateBatchTransaction,
     updateTransaction
 } from "./wysiwyg/transaction";
 import {fetchPost} from "../util/fetch";
+import {getDocDisplayName, isEncryptedBox} from "../util/pathName";
+import {initMirror, refreshUndoButtons, syncMirrorFromBroadcast} from "./undo/globalUndo";
 /// #if !MOBILE
-import {Title} from "./header/Title";
 import {updatePanelByEditor} from "../editor/util";
 import {setPanelFocus} from "../layout/util";
 /// #endif
+import {Title} from "./header/Title";
 import {Background} from "./header/Background";
-import {onGet, setReadonlyByConfig} from "./util/onGet";
+import {disabledProtyle, enableProtyle, onGet, setReadonlyByConfig} from "./util/onGet";
 import {reloadProtyle} from "./util/reload";
 import {renderBacklink} from "./wysiwyg/renderBacklink";
 import {setEmpty} from "../mobile/util/setEmpty";
 import {resize} from "./util/resize";
 import {getDocByScroll} from "./scroll/saveScroll";
-import {App} from "../index";
+import type {App} from "../index";
 import {insertHTML} from "./util/insertHTML";
 import {avRender} from "./render/av/render";
 import {focusBlock, getEditorRange} from "./util/selection";
 import {hasClosestBlock} from "./util/hasClosest";
 import {setStorageVal} from "./util/compatibility";
 import {merge} from "./util/merge";
+/// #if !MOBILE
+import {getAllModels} from "../layout/getAll";
+/// #endif
+import {isSupportCSSHL} from "./render/searchMarkRender";
+import {renderAVAttribute} from "./render/av/blockAttr";
+import {setFoldById, zoomOut} from "../menus/protyle";
+import {setEditMode} from "./util/setEditMode";
+import {waitForPendingTransactions} from "./util/transactionQueue";
 
 export class Protyle {
 
@@ -51,9 +62,9 @@ export class Protyle {
      * @param id 要挂载 Protyle 的元素或者元素 ID。
      * @param options Protyle 参数
      */
-    constructor(app: App, id: HTMLElement, options?: IOptions) {
+    constructor(app: App, id: HTMLElement, options: IProtyleOptions) {
         this.version = Constants.SIYUAN_VERSION;
-        let pluginsOptions: IOptions = options;
+        let pluginsOptions: IProtyleOptions = options;
         app.plugins.forEach(item => {
             if (item.protyleOptions) {
                 pluginsOptions = merge(pluginsOptions, item.protyleOptions);
@@ -64,34 +75,57 @@ export class Protyle {
         this.protyle = {
             getInstance: () => this,
             app,
-            transactionTime: new Date().getTime(),
             id: genUUID(),
             disabled: false,
+            lite: !!options.lite,
             updated: false,
             element: id,
+            notebookId: mergedOptions.notebookId,
             options: mergedOptions,
             block: {},
+            highlight: {
+                mark: isSupportCSSHL() ? new Highlight() : undefined,
+                markHL: isSupportCSSHL() ? new Highlight() : undefined,
+                ranges: [],
+                rangeIndex: 0,
+                styleElement: document.createElement("style"),
+            }
         };
+
+        if (isSupportCSSHL()) {
+            const styleId = genUUID();
+            this.protyle.highlight.styleElement.dataset.uuid = styleId;
+            this.protyle.highlight.styleElement.textContent = `.protyle-content::highlight(search-mark-${styleId}) {background-color: var(--b3-highlight-background);color: var(--b3-highlight-color);}
+  .protyle-content::highlight(search-mark-hl-${styleId}) {color: var(--b3-highlight-color);background-color: var(--b3-highlight-current-background)}`;
+        }
 
         this.protyle.hint = new Hint(this.protyle);
         if (mergedOptions.render.breadcrumb) {
             this.protyle.breadcrumb = new Breadcrumb(this.protyle);
         }
-        /// #if !MOBILE
         if (mergedOptions.render.title) {
             this.protyle.title = new Title(this.protyle);
         }
-        /// #endif
         if (mergedOptions.render.background) {
             this.protyle.background = new Background(this.protyle);
         }
 
         this.protyle.element.innerHTML = "";
         this.protyle.element.classList.add("protyle");
+        if (this.protyle.notebookId) {
+            this.protyle.element.setAttribute("data-notebook-id", this.protyle.notebookId);
+        } else {
+            this.protyle.element.removeAttribute("data-notebook-id");
+        }
+        // 启用 RTL 时给 .protyle 元素添加 .rtl 类名，方便主题开发者判断 RTL 方向
+        if (window.siyuan.config.editor.rtl) {
+            this.protyle.element.classList.add("rtl");
+        }
         if (mergedOptions.render.breadcrumb) {
             this.protyle.element.appendChild(this.protyle.breadcrumb.element.parentElement);
         }
-        this.protyle.undo = new Undo();
+        // lite 模式用前端操作日志 undo（不依赖 kernel），其余走 kernel 的 GlobalUndoLog。
+        this.protyle.undo = this.protyle.lite ? new LocalUndo() : new Undo();
         this.protyle.wysiwyg = new WYSIWYG(this.protyle);
         this.protyle.toolbar = new Toolbar(this.protyle);
         this.protyle.scroll = new Scroll(this.protyle); // 不能使用 render.scroll 来判读是否初始化，除非重构后面用到的相关变量
@@ -104,8 +138,8 @@ export class Protyle {
 
         this.init();
         if (!mergedOptions.action.includes(Constants.CB_GET_HISTORY)) {
-            this.protyle.ws = new Model({
-                app,
+            this.protyle.ws = new Model({app});
+            this.protyle.ws.connect({
                 id: this.protyle.id,
                 type: "protyle",
                 msgCallback: (data) => {
@@ -113,29 +147,62 @@ export class Protyle {
                         case "reload":
                             if (data.data === this.protyle.block.rootID) {
                                 reloadProtyle(this.protyle, false);
+                                /// #if !MOBILE
+                                getAllModels().outline.forEach(item => {
+                                    if (item.blockId === data.data) {
+                                        const outlineParam: IObject = {
+                                            id: item.blockId,
+                                            preview: item.isPreview
+                                        };
+                                        if (isEncryptedBox(this.protyle.notebookId)) {
+                                            outlineParam.notebook = this.protyle.notebookId;
+                                        }
+                                        fetchPost("/api/outline/getDocOutline", outlineParam, response => {
+                                            item.update(response);
+                                        });
+                                    }
+                                });
+                                /// #endif
                             }
                             break;
                         case "refreshAttributeView":
-                            Array.from(this.protyle.wysiwyg.element.querySelectorAll(`[data-av-id="${data.data.id}"]`)).forEach((item: HTMLElement) => {
+                            Array.from(this.protyle.wysiwyg.element.querySelectorAll(`.av[data-av-id="${data.data.id}"]`)).forEach((item: HTMLElement) => {
                                 item.removeAttribute("data-render");
                                 avRender(item, this.protyle);
                             });
+                            if (this.protyle.databaseAttributePanel?.hasDatabase(data.data.id)) {
+                                this.protyle.databaseAttributePanel.refresh();
+                            }
+                            /// #if MOBILE
+                            document.querySelectorAll<HTMLElement>(
+                                `.protyle-db-row--mobile[data-protyle-id="${this.protyle.id}"] .protyle-db-row__body > [data-av-id="${data.data.id}"]`
+                            ).forEach((item) => {
+                                renderAVAttribute(item.parentElement as HTMLElement, item.dataset.nodeId, this.protyle, undefined, {
+                                    avID: data.data.id,
+                                    itemID: item.dataset.nodeId,
+                                    valueID: "",
+                                });
+                            });
+                            /// #endif
+                            /// #if !MOBILE
+                            getAllModels().custom.forEach((item) => {
+                                if (item.type === "siyuan-database-row" && (item.data.avID === data.data.id ||
+                                    item.element.querySelector(`[data-av-id="${data.data.id}"]`))) {
+                                    item.update?.();
+                                }
+                            });
+                            /// #endif
                             break;
                         case "addLoading":
                             if (data.data === this.protyle.block.rootID) {
                                 addLoading(this.protyle, data.msg);
                             }
                             break;
+                        case "unfoldHeading":
+                            setFoldById(data.data, this.protyle);
+                            break;
                         case "transactions":
-                            data.data[0].doOperations.forEach((item: IOperation) => {
-                                if (!this.protyle.preview.element.classList.contains("fn__none") &&
-                                    item.action !== "updateAttrs"   // 预览模式下点击只读
-                                ) {
-                                    this.protyle.preview.render(this.protyle);
-                                } else {
-                                    onTransaction(this.protyle, item, false);
-                                }
-                            });
+                            this.onTransaction(data);
                             break;
                         case "readonly":
                             window.siyuan.config.editor.readOnly = data.data;
@@ -145,10 +212,14 @@ export class Protyle {
                         case "li2doc":
                             if (this.protyle.block.rootID === data.data.srcRootBlockID) {
                                 if (this.protyle.block.showAll && data.cmd === "heading2doc" && !this.protyle.options.backlinkData) {
-                                    fetchPost("/api/filetree/getDoc", {
+                                    const getDocParam: IObject = {
                                         id: this.protyle.block.rootID,
                                         size: window.siyuan.config.editor.dynamicLoadBlocks,
-                                    }, getResponse => {
+                                    };
+                                    if (isEncryptedBox(this.protyle.notebookId)) {
+                                        getDocParam.notebook = this.protyle.notebookId;
+                                    }
+                                    fetchPost("/api/filetree/getDoc", getDocParam, getResponse => {
                                         onGet({data: getResponse, protyle: this.protyle});
                                     });
                                 } else {
@@ -171,23 +242,34 @@ export class Protyle {
                         case "rename":
                             if (this.protyle.path === data.data.path) {
                                 if (this.protyle.model) {
-                                    this.protyle.model.parent.updateTitle(data.data.title);
+                                    this.protyle.model.parent.updateTitle(getDocDisplayName(data.data.title, data.data.empty));
                                 }
                                 if (this.protyle.background) {
                                     this.protyle.background.ial.title = data.data.title;
                                 }
+                                if (window.siyuan.config.export.addTitle &&
+                                    !this.protyle.preview.element.classList.contains("fn__none")) {
+                                    this.protyle.preview.render(this.protyle);
+                                }
                             }
                             if (this.protyle.options.render.title && this.protyle.block.parentID === data.data.id) {
-                                if (getSelection().rangeCount > 0 && this.protyle.title.editElement.contains(getSelection().getRangeAt(0).startContainer)) {
+                                if (!document.body.classList.contains("body--blur") && getSelection().rangeCount > 0 &&
+                                    this.protyle.title.editElement?.contains(getSelection().getRangeAt(0).startContainer)) {
                                     // 标题编辑中的不用更新 https://github.com/siyuan-note/siyuan/issues/6565
                                 } else {
-                                    this.protyle.title.setTitle(data.data.title);
+                                    this.protyle.title.setTitle(data.data.title, data.data.empty);
+                                }
+                                if (data.data.empty) {
+                                    this.protyle.wysiwyg.element.setAttribute(Constants.CUSTOM_SY_TITLE_EMPTY, "true");
+                                } else {
+                                    this.protyle.wysiwyg.element.removeAttribute(Constants.CUSTOM_SY_TITLE_EMPTY);
                                 }
                             }
                             // update ref
                             this.protyle.wysiwyg.element.querySelectorAll(`[data-type~="block-ref"][data-id="${data.data.id}"]`).forEach(item => {
                                 if (item.getAttribute("data-subtype") === "d") {
-                                    item.textContent = data.data.refText;
+                                    // 同 updateRef 一样处理 https://github.com/siyuan-note/siyuan/issues/10458
+                                    item.innerHTML = data.data.refText;
                                 }
                             });
                             break;
@@ -195,15 +277,21 @@ export class Protyle {
                             if (this.protyle.path === data.data.fromPath) {
                                 this.protyle.path = data.data.newPath;
                                 this.protyle.notebookId = data.data.toNotebook;
+                                if (this.protyle.notebookId) {
+                                    this.protyle.element.setAttribute("data-notebook-id", this.protyle.notebookId);
+                                } else {
+                                    this.protyle.element.removeAttribute("data-notebook-id");
+                                }
                             }
                             break;
-                        case "unmount":
+                        case "closeBox":
+                        case "removeBox":
                             if (this.protyle.notebookId === data.data.box) {
                                 /// #if MOBILE
                                 setEmpty(app);
                                 /// #else
                                 if (this.protyle.model) {
-                                    this.protyle.model.parent.parent.removeTab(this.protyle.model.parent.id, false);
+                                    this.protyle.model.parent.parent.removeTab(this.protyle.model.parent.id);
                                 }
                                 /// #endif
                             }
@@ -214,7 +302,7 @@ export class Protyle {
                                 setEmpty(app);
                                 /// #else
                                 if (this.protyle.model) {
-                                    this.protyle.model.parent.parent.removeTab(this.protyle.model.parent.id, false);
+                                    this.protyle.model.parent.parent.removeTab(this.protyle.model.parent.id);
                                 }
                                 /// #endif
                                 delete window.siyuan.storage[Constants.LOCAL_FILEPOSITION][this.protyle.block.rootID];
@@ -227,6 +315,8 @@ export class Protyle {
             if (options.backlinkData) {
                 this.protyle.block.rootID = options.blockId;
                 renderBacklink(this.protyle, options.backlinkData);
+                // 为了满足 eventPath0.style.paddingLeft 从而显示块标 https://github.com/siyuan-note/siyuan/issues/11578
+                this.protyle.wysiwyg.element.style.padding = "4px 16px 4px 24px";
                 return;
             }
             if (!options.blockId) {
@@ -258,18 +348,94 @@ export class Protyle {
         }
     }
 
-    private getDoc(mergedOptions: IOptions) {
-        fetchPost("/api/filetree/getDoc", {
+    private onTransaction(data: IWebSocketData) {
+        // 多窗口/多端：用广播附带的撤销状态同步本地镜像
+        if (data.context?.undoState) {
+            syncMirrorFromBroadcast(data.context.undoState);
+        }
+        if (!this.protyle.preview.element.classList.contains("fn__none") &&
+            data.context?.rootIDs?.includes(this.protyle.block.rootID)) {
+            this.protyle.preview.render(this.protyle);
+            return;
+        }
+        const hadContent = this.protyle.wysiwyg.element.childElementCount > 0;
+        let needCreateAction = "";
+        let hasDeleteOp = false;
+        const operations: IOperation[] = [];
+        data.data[0].doOperations.find((item: IOperation) => {
+            if (this.protyle.options.backlinkData && ["delete", "move"].includes(item.action)) {
+                // 反链上下文只展示源文档的一部分，结构操作等待索引提交后按内容版本增量同步。
+                return true;
+            } else {
+                if (item.action === "delete") {
+                    hasDeleteOp = true;
+                }
+                operations.push(item);
+                // 反链面板移除元素后，文档为空
+                if (!(item.action === "delete" && typeof item.data?.createEmptyParagraph === "boolean" && !item.data.createEmptyParagraph)) {
+                    needCreateAction = item.action;
+                }
+            }
+        });
+        if (operations.length > 0) {
+            onTransaction(this.protyle, operations, false);
+        }
+        // 聚焦块被分屏另一侧的删除操作连带删除时（容器块删除会级联删除其所有子孙块，如列表/超级块/引述等），当前页签的聚焦块已成为孤儿但仍显示，需退出聚焦
+        // Improve editor state synchronization when deleting blocks https://github.com/siyuan-note/siyuan/issues/17742
+        if (this.protyle.block.showAll && hasDeleteOp) {
+            fetchPost("/api/block/checkBlockExist", {id: this.protyle.block.id}, response => {
+                if (!response.data) {
+                    zoomOut({
+                        protyle: this.protyle,
+                        id: this.protyle.block.rootID
+                    });
+                }
+            });
+            return;
+        }
+        if (this.protyle.element.dataset.loading === "finished" && hadContent &&
+            this.protyle.wysiwyg.element.childElementCount === 0 && this.protyle.block.parentID && needCreateAction) {
+            if (needCreateAction === "delete" && this.protyle.block.showAll) {
+                if (this.protyle.options.handleEmptyContent) {
+                    this.protyle.options.handleEmptyContent();
+                } else {
+                    zoomOut({
+                        protyle: this.protyle,
+                        id: this.protyle.block.rootID,
+                        focusId: this.protyle.block.id
+                    });
+                }
+            } else {
+                // 不能使用 transaction，否则分屏后会重复添加
+                refreshUndoButtons(this.protyle);
+                this.reload(false);
+            }
+        }
+        // undo/redo 重放广播到达后，整批操作已应用，重置 lastHTMLs 防下次本地编辑算错逆操作
+        if (data.context?.isUndoReplay === true) {
+            this.protyle.wysiwyg.lastHTMLs = {};
+        }
+    }
+
+    private getDoc(mergedOptions: IProtyleOptions) {
+        const getDocParam: Record<string, any> = {
             id: mergedOptions.blockId,
+            includeDocInfo: true,
             isBacklink: mergedOptions.action.includes(Constants.CB_GET_BACKLINK),
+            originalRefBlockIDs: mergedOptions.originalRefBlockIDs,
             // 0: 仅当前 ID（默认值），1：向上 2：向下，3：上下都加载，4：加载最后
             mode: (mergedOptions.action && mergedOptions.action.includes(Constants.CB_GET_CONTEXT)) ? 3 : 0,
             size: mergedOptions.action?.includes(Constants.CB_GET_ALL) ? Constants.SIZE_GET_MAX : window.siyuan.config.editor.dynamicLoadBlocks,
-        }, getResponse => {
+        };
+        if (isEncryptedBox(this.protyle.notebookId)) {
+            getDocParam.notebook = this.protyle.notebookId;
+        }
+        fetchPost("/api/filetree/getDoc", getDocParam, getResponse => {
             onGet({
                 data: getResponse,
                 protyle: this.protyle,
                 action: mergedOptions.action,
+                scrollPosition: mergedOptions.scrollPosition,
                 afterCB: () => {
                     this.afterOnGet(mergedOptions);
                 }
@@ -277,10 +443,14 @@ export class Protyle {
         });
     }
 
-    private afterOnGet(mergedOptions: IOptions) {
+    private afterOnGet(mergedOptions: IProtyleOptions) {
+        // 文档加载完成后初始化撤销镜像（低频，不在 selectionchange 热路径）
+        if (this.protyle.block?.rootID) {
+            initMirror(this.protyle.block.rootID);
+        }
         if (this.protyle.model) {
             /// #if !MOBILE
-            if (mergedOptions.action?.includes(Constants.CB_GET_FOCUS)) {
+            if (mergedOptions.action?.includes(Constants.CB_GET_FOCUS) || mergedOptions.action?.includes(Constants.CB_GET_OPENNEW)) {
                 setPanelFocus(this.protyle.model.element.parentElement.parentElement);
             }
             updatePanelByEditor({
@@ -332,7 +502,7 @@ export class Protyle {
     }
 
     private init() {
-        this.protyle.lute = setLute({
+        this.protyle.lute = getLute({
             emojiSite: this.protyle.options.hint.emojiPath,
             emojis: this.protyle.options.hint.emoji,
             headingAnchor: false,
@@ -370,12 +540,17 @@ export class Protyle {
         resize(this.protyle);
     }
 
-    public reload(focus: boolean) {
-        reloadProtyle(this.protyle, focus);
+    public reload(focus: boolean, updateReadonly?: boolean) {
+        reloadProtyle(this.protyle, focus, updateReadonly);
     }
 
     public insert(html: string, isBlock = false, useProtyleRange = false) {
         insertHTML(html, this.protyle, isBlock, useProtyleRange);
+    }
+
+    public async flushPendingTransactions() {
+        await this.protyle.wysiwyg.flushPendingInput();
+        await waitForPendingTransactions(this.protyle);
     }
 
     public transaction(doOperations: IOperation[], undoOperations?: IOperation[]) {
@@ -409,8 +584,17 @@ export class Protyle {
         });
     }
 
+    /**
+     * @deprecated 将在 3.7.1 版本中移除。请改用 {@link updateTransactionElement}。
+     */
     public updateTransaction(id: string, newHTML: string, html: string) {
-        updateTransaction(this.protyle, id, newHTML, html);
+        const element = document.createElement("template");
+        element.innerHTML = newHTML;
+        updateTransaction(this.protyle, element.content.firstElementChild, html);
+    }
+
+    public updateTransactionElement(element: Element, oldHTML: string) {
+        updateTransaction(this.protyle, element, oldHTML);
     }
 
     public updateBatchTransaction(nodeElements: Element[], cb: (e: HTMLElement) => void) {
@@ -427,5 +611,21 @@ export class Protyle {
 
     public focusBlock(element: Element, toStart = true) {
         return focusBlock(element, undefined, toStart);
+    }
+
+    public disable() {
+        disabledProtyle(this.protyle);
+    }
+
+    public enable() {
+        enableProtyle(this.protyle);
+    }
+
+    public renderAVAttribute(element: HTMLElement, id: string, cb?: (element: HTMLElement) => void) {
+        renderAVAttribute(element, id, this.protyle, cb);
+    }
+
+    public switchMode(mode: TEditorMode) {
+        setEditMode(this.protyle, mode);
     }
 }

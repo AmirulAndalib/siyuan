@@ -1,11 +1,12 @@
 {
 	"ID": "20230808120347-3cob0nb",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20230808120347-3cob0nb",
 		"title": "数据同步",
-		"updated": "20231120213300"
+		"type": "doc",
+		"updated": "20260803163440"
 	},
 	"Children": [
 		{
@@ -14,7 +15,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230808120347-wx5cr4v",
-				"updated": "20210721103911"
+				"updated": "20250218120940"
 			},
 			"Children": [
 				{
@@ -28,7 +29,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230808120347-q4v034g",
-				"updated": "20210721103854"
+				"updated": "20250218120940"
 			},
 			"Children": [
 				{
@@ -42,23 +43,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " 文件夹数据一致，包括"
-				},
-				{
-					"Type": "NodeText",
-					"Data": "资源文件"
-				},
-				{
-					"Type": "NodeText",
-					"Data": "、模板、"
-				},
-				{
-					"Type": "NodeText",
-					"Data": "挂件"
-				},
-				{
-					"Type": "NodeText",
-					"Data": "以及笔记本数据。"
+					"Data": "​ 文件夹数据一致，包括资源文件、自定义图标、插件、代码片段、模板、挂件和文档数据。"
 				}
 			]
 		},
@@ -68,7 +53,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230808120347-qbr56bx",
-				"updated": "20210721103758"
+				"updated": "20250115162650"
 			},
 			"Children": [
 				{
@@ -143,7 +128,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "云端"
+									"TextMarkTextContent": "账号与同步"
 								},
 								{
 									"Type": "NodeText",
@@ -220,7 +205,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230808120347-y41kxh2",
-				"updated": "20230220103623"
+				"updated": "20250115162650"
 			},
 			"Children": [
 				{
@@ -260,7 +245,7 @@
 					},
 					"Properties": {
 						"id": "20230808120347-3l72g5v",
-						"updated": "20230220103538"
+						"updated": "20250115162650"
 					},
 					"Children": [
 						{
@@ -268,7 +253,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230808120347-4mlag9e",
-								"updated": "20230220103539"
+								"updated": "20250115162650"
 							},
 							"Children": [
 								{
@@ -278,7 +263,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "导出 - Data"
+									"TextMarkTextContent": "导出 Data"
 								},
 								{
 									"Type": "NodeText",
@@ -287,7 +272,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "导入 - Data"
+									"TextMarkTextContent": "导入 Data"
 								},
 								{
 									"Type": "NodeText",
@@ -305,7 +290,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230808120347-buiv5yn",
-				"updated": "20230219120246"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -319,7 +304,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230808120347-fwrmpx3",
-				"updated": "20230219120420"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -338,7 +323,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "云端"
+					"TextMarkTextContent": "账号与同步"
 				},
 				{
 					"Type": "NodeText",
@@ -351,7 +336,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": "​ 中支持三种同步模式："
+					"Data": " ​ 中支持三种同步模式："
 				}
 			]
 		},
@@ -1134,7 +1119,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230808120347-yy5m46r",
-				"updated": "20220307092835"
+				"updated": "20260614203347"
 			},
 			"Children": [
 				{
@@ -1150,7 +1135,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230808120347-um16u4f",
-				"updated": "20231120213300"
+				"updated": "20260614203347"
 			},
 			"Children": [
 				{
@@ -1204,6 +1189,34 @@
 								{
 									"Type": "NodeText",
 									"Data": "请勿同时使用第三方同步盘和思源同步，可能会导致数据损坏"
+								}
+							]
+						}
+					]
+				},
+				{
+					"ID": "20260614203346-ezgc1h8",
+					"Type": "NodeListItem",
+					"ListData": {
+						"BulletChar": 42,
+						"Marker": "Kg=="
+					},
+					"Properties": {
+						"id": "20260614203346-ezgc1h8",
+						"updated": "20260614203347"
+					},
+					"Children": [
+						{
+							"ID": "20260614203346-9lo6xlu",
+							"Type": "NodeParagraph",
+							"Properties": {
+								"id": "20260614203346-9lo6xlu",
+								"updated": "20260614203347"
+							},
+							"Children": [
+								{
+									"Type": "NodeText",
+									"Data": "思源会自动检测工作空间是否位于第三方同步目录下，如果检测到会强制退出以防止数据损坏"
 								}
 							]
 						}

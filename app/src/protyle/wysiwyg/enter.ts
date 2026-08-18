@@ -1,14 +1,26 @@
-import {genEmptyElement, insertEmptyBlock} from "../../block/util";
-import {getSelectionOffset, focusByWbr, setLastNodeRange, focusBlock, focusByRange} from "../util/selection";
+import {genEmptyElement, genHeadingElement, insertEmptyBlock} from "../../block/util";
+import {focusByRange, focusByWbr, getSelectionOffset, getUndoFocusContext, setLastNodeRange} from "../util/selection";
 import {
-    getContenteditableElement,
+    getContenteditableElement, getParentBlock,
+    getEmbedChildOperationContext,
+    getEmbedChildOperationParentID,
+    getPreviousBlockSibling,
     getTopEmptyElement,
     hasNextSibling,
     hasPreviousSibling,
-    isNotEditBlock
+    isNotEditBlock,
+    IEmbedChildOperationContext
 } from "./getBlock";
-import {transaction, updateTransaction} from "./transaction";
-import {breakList, genListItemElement, listOutdent, updateListOrder} from "./list";
+import {transaction, turnsIntoOneTransaction, updateTransaction} from "./transaction";
+import {
+    breakList,
+    genListItemElement,
+    getFocusedOrderedListInsertOperations,
+    getFocusedParentOrderedList,
+    getOrderedListStart,
+    listOutdent,
+    updateListOrder
+} from "./list";
 import {highlightRender} from "../render/highlightRender";
 import {Constants} from "../../constants";
 import {scrollCenter} from "../../util/highlightById";
@@ -16,189 +28,16 @@ import {hideElements} from "../ui/hideElements";
 import {isIPad, setStorageVal} from "../util/compatibility";
 import {mathRender} from "../render/mathRender";
 import {isMobile} from "../../util/functions";
+import {processRender} from "../util/processCode";
+import {hasClosestByAttribute, hasClosestByClassName} from "../util/hasClosest";
+import {blockRender} from "../render/blockRender";
 
-const listEnter = (protyle: IProtyle, blockElement: HTMLElement, range: Range) => {
-    const listItemElement = blockElement.parentElement;
-
-    const editableElement = getContenteditableElement(blockElement);
-    if (// \n 是因为 https://github.com/siyuan-note/siyuan/issues/3846
-        ["", "\n"].includes(editableElement.textContent) &&
-        blockElement.previousElementSibling.classList.contains("protyle-action") &&
-        !blockElement.querySelector("img") // https://ld246.com/article/1651820644238
-    ) {
-        if (listItemElement.nextElementSibling?.classList.contains("protyle-attr")) {
-            listOutdent(protyle, [blockElement.parentElement], range);
-            return true;
-        } else if (!listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
-            // 打断列表
-            breakList(protyle, blockElement, range);
-            return true;
-        }
+export const enter = async (blockElement: HTMLElement, range: Range, protyle: IProtyle) => {
+    const embedResultElement = hasClosestByClassName(blockElement, "protyle-wysiwyg__embed");
+    const embedContext = getEmbedChildOperationContext(blockElement);
+    if (embedResultElement && !embedContext && !blockElement.classList.contains("code-block")) {
+        return;
     }
-
-    const position = getSelectionOffset(editableElement, protyle.wysiwyg.element, range);
-    if (range.toString() === "" && position.start === 0 &&
-        // 段首为图片是 start 也为 0
-        !hasPreviousSibling(range.startContainer)) {
-        // 段首换行
-        if (listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
-            return true;
-        }
-        // https://github.com/siyuan-note/siyuan/issues/8935
-        const wbrElement = document.createElement("wbr");
-        range.insertNode(wbrElement);
-        const html = listItemElement.parentElement.outerHTML;
-        wbrElement.remove();
-        let newElement = genListItemElement(listItemElement, -1, true);
-        if (!blockElement.previousElementSibling.classList.contains("protyle-action")) {
-            // 列表项中有多个块，最后一个块为空，换行应进行缩进
-            if (getContenteditableElement(blockElement).textContent !== "") {
-                return false;
-            }
-            blockElement.remove();
-            newElement = genListItemElement(listItemElement, -1, true);
-            listItemElement.insertAdjacentElement("afterend", newElement);
-        } else if (getContenteditableElement(blockElement).textContent === "") {
-            listItemElement.insertAdjacentElement("afterend", newElement);
-        } else {
-            listItemElement.insertAdjacentElement("beforebegin", newElement);
-        }
-        if (listItemElement.getAttribute("data-subtype") === "o") {
-            updateListOrder(listItemElement.parentElement);
-        }
-        updateTransaction(protyle, listItemElement.parentElement.getAttribute("data-node-id"), listItemElement.parentElement.outerHTML, html);
-        focusByWbr(newElement, range);
-        scrollCenter(protyle);
-        removeEmptyNode(newElement);
-        return true;
-    }
-
-    const subListElement = listItemElement.querySelector(".list");
-    let newElement;
-    if (subListElement && listItemElement.getAttribute("fold") !== "1" &&
-        // 子列表下的段落块回车 https://ld246.com/article/1623919354587
-        blockElement.nextElementSibling.isSameNode(subListElement)) {
-        // 含有子列表的换行
-        if (position.end >= editableElement.textContent.length -
-            // 数学公式结尾会有 zwsp https://github.com/siyuan-note/siyuan/issues/6679
-            (editableElement.textContent.endsWith(Constants.ZWSP) ? 1 : 0)) {
-            // 段末换行，在子列表中插入
-            range.insertNode(document.createElement("wbr"));
-            const html = subListElement.outerHTML;
-            blockElement.querySelector("wbr").remove();
-            newElement = genListItemElement(subListElement.firstElementChild, -1, true);
-            subListElement.firstElementChild.before(newElement);
-            if (subListElement.getAttribute("data-subtype") === "o") {
-                updateListOrder(subListElement);
-            }
-            updateTransaction(protyle, subListElement.getAttribute("data-node-id"), subListElement.outerHTML, html);
-            focusByWbr(listItemElement, range);
-            scrollCenter(protyle);
-        } else {
-            // 文字中间换行
-            range.insertNode(document.createElement("wbr"));
-            const listItemHTMl = listItemElement.outerHTML;
-            const html = listItemElement.parentElement.outerHTML;
-            if (range.toString() !== "") {
-                range.extractContents();
-                range.insertNode(document.createElement("wbr"));
-            }
-            range.setEndAfter(editableElement.lastChild);
-            newElement = genListItemElement(listItemElement, 0, false);
-            const newEditElement = getContenteditableElement(newElement);
-            newEditElement.appendChild(range.extractContents());
-            newEditElement.parentElement.after(subListElement);
-            listItemElement.insertAdjacentElement("afterend", newElement);
-            if (listItemElement.getAttribute("data-subtype") === "o") {
-                updateListOrder(listItemElement.parentElement);
-            }
-            if (listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
-                transaction(protyle, [{
-                    action: "update",
-                    data: listItemElement.outerHTML,
-                    id: listItemElement.getAttribute("data-node-id")
-                }, {
-                    action: "insert",
-                    id: newElement.getAttribute("data-node-id"),
-                    data: newElement.outerHTML,
-                    previousID: listItemElement.getAttribute("data-node-id")
-                }], [{
-                    action: "delete",
-                    id: newElement.getAttribute("data-node-id"),
-                }, {
-                    action: "update",
-                    data: listItemHTMl,
-                    id: listItemElement.getAttribute("data-node-id")
-                }]);
-            } else {
-                updateTransaction(protyle, listItemElement.parentElement.getAttribute("data-node-id"), listItemElement.parentElement.outerHTML, html);
-            }
-            focusByWbr(newElement, range);
-            scrollCenter(protyle);
-        }
-        removeEmptyNode(newElement);
-        return true;
-    }
-    if ((range.toString() === "" || range.toString() === Constants.ZWSP) && range.startContainer.nodeType === 3 && range.startContainer.textContent === Constants.ZWSP && range.startOffset === 0) {
-        // 图片后的零宽空格前回车 https://github.com/siyuan-note/siyuan/issues/5690
-        // 列表中的图片后双击换行图片光标错误 https://ld246.com/article/1660987186727/comment/1662181221732?r=Vanessa#comments
-        range.setStart(range.startContainer, 1);
-        range.collapse(false);
-    }
-    range.insertNode(document.createElement("wbr"));
-    const listItemHTML = listItemElement.outerHTML;
-    const html = listItemElement.parentElement.outerHTML;
-    if (range.toString() !== "") {
-        range.extractContents();
-        range.insertNode(document.createElement("wbr"));
-    }
-    range.setEndAfter(editableElement.lastChild);
-    newElement = genListItemElement(listItemElement, 0, false);
-    const selectNode = range.extractContents();
-    if (selectNode.firstChild.nodeType !== 3 && selectNode.firstChild.textContent === "") {
-        // 回车移除空元素 https://github.com/siyuan-note/insider/issues/480
-        selectNode.firstChild.after(document.createElement("wbr"));
-        selectNode.firstChild.remove();
-    }
-    // https://github.com/siyuan-note/siyuan/issues/3850
-    // https://github.com/siyuan-note/siyuan/issues/6018
-    if ((editableElement?.lastElementChild?.getAttribute("data-type") || "").indexOf("inline-math") > -1 &&
-        !hasNextSibling(editableElement?.lastElementChild)) {
-        editableElement.insertAdjacentText("beforeend", "\n");
-    }
-    getContenteditableElement(newElement).appendChild(selectNode);
-    listItemElement.insertAdjacentElement("afterend", newElement);
-    if (listItemElement.getAttribute("data-subtype") === "o") {
-        updateListOrder(listItemElement.parentElement);
-    }
-    if (listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
-        transaction(protyle, [{
-            action: "update",
-            id: listItemElement.getAttribute("data-node-id"),
-            data: listItemElement.outerHTML,
-        }, {
-            action: "insert",
-            id: newElement.getAttribute("data-node-id"),
-            data: newElement.outerHTML,
-            previousID: listItemElement.getAttribute("data-node-id")
-        }], [{
-            action: "delete",
-            id: newElement.getAttribute("data-node-id"),
-        }, {
-            action: "update",
-            id: listItemElement.getAttribute("data-node-id"),
-            data: listItemHTML
-        }]);
-    } else {
-        updateTransaction(protyle, listItemElement.parentElement.getAttribute("data-node-id"), listItemElement.parentElement.outerHTML, html);
-    }
-    focusByWbr(newElement, range);
-    scrollCenter(protyle);
-    removeEmptyNode(newElement);
-    return true;
-};
-
-export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle) => {
     const disableElement = isNotEditBlock(blockElement);
     if (!disableElement && blockElement.classList.contains("protyle-wysiwyg--select")) {
         setLastNodeRange(getContenteditableElement(blockElement), range, false);
@@ -206,22 +45,11 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
         hideElements(["select"], protyle);
         return;
     }
+    protyle.observerLoad?.disconnect();
     // https://github.com/siyuan-note/siyuan/issues/5471
-    if (disableElement) {
-        if (blockElement.parentElement.classList.contains("li")) {
-            const oldHTML = blockElement.parentElement.parentElement.outerHTML;
-            const newElement = genListItemElement(blockElement.parentElement, 0, true);
-            blockElement.parentElement.insertAdjacentElement("afterend", newElement);
-            updateTransaction(protyle, blockElement.parentElement.parentElement.getAttribute("data-node-id"), blockElement.parentElement.parentElement.outerHTML, oldHTML);
-            focusByWbr(newElement, range);
-            removeEmptyNode(newElement);
-            scrollCenter(protyle);
-            return;
-        }
-        if (blockElement.classList.contains("hr")) {
-            insertEmptyBlock(protyle, "afterend");
-            return;
-        }
+    if (disableElement ||
+        // https://github.com/siyuan-note/siyuan/issues/10633
+        blockElement.classList.contains("table")) {
         if (blockElement.classList.contains("protyle-wysiwyg--select") && blockElement.classList.contains("render-node")) {
             protyle.toolbar.showRender(protyle, blockElement);
         } else {
@@ -238,17 +66,35 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
     if (blockElement.getAttribute("data-type") === "NodeAttributeView") {
         return true;
     }
-    // 代码块
-    const trimStartText = editableElement.innerHTML.trimStart();
-    if (trimStartText.startsWith("```") || trimStartText.startsWith("···") || trimStartText.startsWith("~~~") ||
-        trimStartText.indexOf("\n```") > -1 || trimStartText.indexOf("\n~~~") > -1 || trimStartText.indexOf("\n···") > -1) {
-        if (trimStartText.indexOf("\n") === -1 && trimStartText.replace(/·|~/g, "`").replace(/^`{3,}/g, "").indexOf("`") > -1) {
+
+    const trimStartHTML = editableElement.innerHTML.trimStart();
+    const trimStartText = editableElement.textContent.trimStart();
+    const enableCodeBlockMiddleDot = window.siyuan.config.editor.markdown.codeBlockMiddleDot !== false;
+    const codeBlockMarkerRegExp = enableCodeBlockMiddleDot ? /·|~/g : /~/g;
+    const codeBlockFenceStartRegExp = enableCodeBlockMiddleDot ? /^(~|·|`){3,}/g : /^(~|`){3,}/g;
+    const codeBlockFenceLineRegExp = enableCodeBlockMiddleDot ? /\n(~|·|`){3,}/g : /\n(~|`){3,}/g;
+    const hasCodeBlockFence = (html: string, text: string) => html.startsWith("```") || html.startsWith("~~~") ||
+        (html.indexOf("\n```") > -1 && text.indexOf("\n```") > -1) ||
+        (html.indexOf("\n~~~") > -1 && text.indexOf("\n~~~") > -1) ||
+        (enableCodeBlockMiddleDot && (html.startsWith("···") ||
+            (html.indexOf("\n···") > -1 && text.indexOf("\n···") > -1)));
+    if (hasCodeBlockFence(trimStartHTML, trimStartText)) {
+        if (trimStartHTML.indexOf("\n") === -1 &&
+            trimStartHTML.replace(codeBlockMarkerRegExp, "`").replace(/^`{3,}/g, "").indexOf("`") > -1) {
             // ```test` 不处理，正常渲染为段落块
         } else if (blockElement.classList.contains("p")) { // https://github.com/siyuan-note/siyuan/issues/6953
+            range.insertNode(document.createElement("wbr"));
             const oldHTML = blockElement.outerHTML;
-            let replaceInnerHTML = editableElement.innerHTML.replace(/\n(~|·|`){3,}/g, "\n```").trim().replace(/^(~|·|`){3,}/g, "```");
+            // https://github.com/siyuan-note/siyuan/issues/16744
+            range.extractContents();
+            const wbrElement = document.createElement("wbr");
+            range.insertNode(wbrElement);
+            wbrElement.after(document.createTextNode("\n"));
+            let replaceInnerHTML = editableElement.innerHTML
+                .replace(codeBlockFenceLineRegExp, "\n```").trim()
+                .replace(codeBlockFenceStartRegExp, "```");
             if (!replaceInnerHTML.endsWith("\n```")) {
-                replaceInnerHTML += "<wbr>\n```";
+                replaceInnerHTML += "\n```";
             }
             editableElement.innerHTML = replaceInnerHTML;
             blockElement.outerHTML = protyle.lute.SpinBlockDOM(blockElement.outerHTML);
@@ -257,18 +103,29 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
             if (languageElement) {
                 if (window.siyuan.storage[Constants.LOCAL_CODELANG] && languageElement.textContent === "") {
                     languageElement.textContent = window.siyuan.storage[Constants.LOCAL_CODELANG];
-                } else {
+                } else if (!Constants.SIYUAN_RENDER_CODE_LANGUAGES.includes(languageElement.textContent)) {
                     window.siyuan.storage[Constants.LOCAL_CODELANG] = languageElement.textContent;
                     setStorageVal(Constants.LOCAL_CODELANG, window.siyuan.storage[Constants.LOCAL_CODELANG]);
                 }
-                highlightRender(blockElement);
+                if (Constants.SIYUAN_RENDER_CODE_LANGUAGES.includes(languageElement.textContent)) {
+                    blockElement.dataset.content = "";
+                    blockElement.dataset.subtype = languageElement.textContent;
+                    blockElement.className = "render-node";
+                    blockElement.innerHTML = `<div spin="1"></div><div class="protyle-attr" contenteditable="false">${Constants.ZWSP}</div>`;
+                    protyle.toolbar.showRender(protyle, blockElement);
+                    processRender(blockElement);
+                } else {
+                    highlightRender(blockElement);
+                }
             } else {
                 protyle.toolbar.showRender(protyle, blockElement);
+                processRender(blockElement);
             }
-            updateTransaction(protyle, blockElement.getAttribute("data-node-id"), blockElement.outerHTML, oldHTML);
+            updateTransaction(protyle, blockElement, oldHTML);
             return true;
         }
     }
+    // 代码块
     if (blockElement.getAttribute("data-type") === "NodeCodeBlock") {
         const wbrElement = document.createElement("wbr");
         range.insertNode(wbrElement);
@@ -281,17 +138,23 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
         range.insertNode(document.createTextNode("\n"));
         range.collapse(false);
         range.insertNode(wbrElement);
-        editableElement.removeAttribute("data-render");
+        editableElement.parentElement.removeAttribute("data-render");
         highlightRender(blockElement);
-        updateTransaction(protyle, blockElement.getAttribute("data-node-id"), blockElement.outerHTML, oldHTML);
+        updateTransaction(protyle, blockElement, oldHTML);
+        scrollCenter(protyle);
         return true;
     }
 
-    // bq
+    // bq || callout
     if (editableElement.textContent.replace(Constants.ZWSP, "").replace("\n", "") === "" &&
-        blockElement.nextElementSibling && blockElement.nextElementSibling.classList.contains("protyle-attr") && blockElement.parentElement.getAttribute("data-type") === "NodeBlockquote") {
+        ((blockElement.nextElementSibling && blockElement.nextElementSibling.classList.contains("protyle-attr") &&
+                blockElement.parentElement.getAttribute("data-type") === "NodeBlockquote") ||
+            (blockElement.parentElement.classList.contains("callout-content") && !blockElement.nextElementSibling))) {
+        if (embedContext && !embedContext.boundaryElement.contains(getParentBlock(blockElement).parentElement)) {
+            return;
+        }
         range.insertNode(document.createElement("wbr"));
-        const topElement = getTopEmptyElement(blockElement);
+        const topElement = getTopEmptyElement(blockElement, embedContext?.boundaryElement);
         const blockId = blockElement.getAttribute("data-node-id");
         const topId = topElement.getAttribute("data-node-id");
         const doInsert: IOperation = {
@@ -304,25 +167,44 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
             id: topId,
             data: topElement.outerHTML,
         };
+        let parentBlockElement = getParentBlock(blockElement);
         if (topId === blockId) {
-            doInsert.previousID = blockElement.parentElement.getAttribute("data-node-id");
+            doInsert.previousID = parentBlockElement.getAttribute("data-node-id");
             undoInsert.previousID = blockElement.previousElementSibling.getAttribute("data-node-id");
-            blockElement.parentElement.after(blockElement);
+            parentBlockElement.after(blockElement);
         } else {
-            doInsert.previousID = topElement.previousElementSibling ? topElement.previousElementSibling.getAttribute("data-node-id") : undefined;
-            doInsert.parentID = topElement.parentElement.getAttribute("data-node-id") || protyle.block.parentID;
+            doInsert.previousID = getPreviousBlockSibling(topElement)?.getAttribute("data-node-id");
+            doInsert.parentID = getEmbedChildOperationParentID(topElement, embedContext) ||
+                getParentBlock(topElement).getAttribute("data-node-id") || protyle.block.parentID;
             undoInsert.previousID = doInsert.previousID;
             undoInsert.parentID = doInsert.parentID;
             topElement.after(blockElement);
             topElement.remove();
         }
-        transaction(protyle, [{
+        parentBlockElement = getParentBlock(blockElement);
+        const enterDoOperations: IOperation[] = [{
             action: "delete",
             id: topId
-        }, doInsert], [{
+        }, doInsert];
+        const enterUndoOperations: IOperation[] = [{
             action: "delete",
             id: blockId,
-        }, undoInsert]);
+        }, undoInsert];
+        if (topId === blockId && parentBlockElement.classList.contains("sb") &&
+            parentBlockElement.getAttribute("data-sb-layout") === "col") {
+            // 合并到同一个 transaction，避免新块 id 在第二个 transaction 中找不到
+            const sbOperations = await turnsIntoOneTransaction({
+                protyle,
+                selectsElement: [blockElement.previousElementSibling, blockElement],
+                type: "BlocksMergeSuperBlock",
+                level: "row",
+                unfocus: true,
+                getOperations: true,
+            });
+            enterDoOperations.push(...sbOperations.doOperations);
+            enterUndoOperations.splice(0, 0, ...sbOperations.undoOperations);
+        }
+        transaction(protyle, enterDoOperations, enterUndoOperations);
         focusByWbr(blockElement, range);
         return true;
     }
@@ -334,45 +216,112 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
             (blockElement.nextElementSibling.classList.contains("list") && blockElement.previousElementSibling?.classList.contains("protyle-action")) ||
             (position.start === 0 && blockElement.previousElementSibling.classList.contains("protyle-action")) ||
             blockElement.parentElement.getAttribute("fold") === "1"
-        ) && listEnter(protyle, blockElement, range)
-    ) {
-        return true;
+        )) {
+        const embedListEnterMode = embedContext ? getEmbedListEnterMode(blockElement, embedContext) : "list";
+        if ("none" === embedListEnterMode) {
+            return;
+        }
+        if ("list" === embedListEnterMode && await listEnter(protyle, blockElement, range)) {
+            return true;
+        }
     }
 
     // 段首换行
     if (editableElement.textContent !== "" && range.toString() === "" && position.start === 0) {
-        const newElement = genEmptyElement(false, true);
+        const undoFocusContext = getUndoFocusContext(protyle.wysiwyg.element, range);
+        let newElement;
+        const previousBlockElement = getPreviousBlockSibling(blockElement);
+        if (previousBlockElement?.getAttribute("data-type") === "NodeHeading" &&
+            previousBlockElement.getAttribute("fold") === "1") {
+            newElement = genHeadingElement(previousBlockElement, false, true) as HTMLDivElement;
+        } else {
+            newElement = genEmptyElement(false, true);
+        }
+        blockElement.insertAdjacentElement("beforebegin", newElement);
         const newId = newElement.getAttribute("data-node-id");
-        transaction(protyle, [{
+        const doOperations: IOperation[] = [{
             action: "insert",
             data: newElement.outerHTML,
             id: newId,
-            previousID: blockElement.previousElementSibling ? blockElement.previousElementSibling.getAttribute("data-node-id") : "",
-            parentID: blockElement.parentElement.getAttribute("data-node-id") || protyle.block.parentID
-        }], [{
+            nextID: blockElement.getAttribute("data-node-id"),
+        }];
+        const undoOperations: IOperation[] = [{
             action: "delete",
             id: newId,
-        }]);
+            context: undoFocusContext,
+        }];
+        if (blockElement.parentElement.classList.contains("sb") &&
+            blockElement.parentElement.getAttribute("data-sb-layout") === "col") {
+            const mergeOperations = await turnsIntoOneTransaction({
+                protyle,
+                selectsElement: [newElement, blockElement],
+                type: "BlocksMergeSuperBlock",
+                level: "row",
+                unfocus: true,
+                getOperations: true,
+                widthSourceElement: blockElement,
+            });
+            doOperations.push(...mergeOperations.doOperations);
+            undoOperations.splice(0, 0, ...mergeOperations.undoOperations);
+        }
+        transaction(protyle, doOperations, undoOperations);
         newElement.querySelector("wbr").remove();
-        blockElement.insertAdjacentElement("beforebegin", newElement);
         removeEmptyNode(newElement);
         return true;
     }
-    const wbrElement = document.createElement("wbr");
-    range.insertNode(wbrElement);
+    const undoFocusContext = getUndoFocusContext(protyle.wysiwyg.element, range);
+    range.insertNode(document.createElement("wbr"));
     const html = blockElement.outerHTML;
-    wbrElement.remove();
+    const parentHTML = getParentBlock(blockElement).outerHTML;
     if (range.toString() !== "") {
+        // 选中数学公式后回车取消选中 https://github.com/siyuan-note/siyuan/issues/12637#issuecomment-2381106949
+        const mathElement = hasClosestByAttribute(range.startContainer, "data-type", "inline-math");
+        if (mathElement) {
+            const nextSibling = hasNextSibling(mathElement);
+            if (nextSibling) {
+                range = getSelection().getRangeAt(0);
+                range.setEnd(nextSibling, nextSibling.textContent.startsWith(Constants.ZWSP) ? 1 : 0);
+                range.collapse(false);
+            }
+            mathElement.querySelector("wbr")?.remove();
+            return true;
+        }
         range.extractContents();
+        range.insertNode(document.createElement("wbr"));
     }
     if (editableElement.lastChild) {
         range.setEndAfter(editableElement.lastChild);
     }
-
     const id = blockElement.getAttribute("data-node-id");
     const newElement = document.createElement("div");
-    newElement.appendChild(genEmptyElement(false, false));
-    newElement.querySelector('[contenteditable="true"]').appendChild(range.extractContents());
+    if (blockElement.getAttribute("data-type") === "NodeHeading" && blockElement.getAttribute("fold") === "1") {
+        newElement.innerHTML = genHeadingElement(blockElement, true) as string;
+    } else {
+        newElement.appendChild(genEmptyElement(false, false));
+    }
+    const newEditableElement = newElement.querySelector('[contenteditable="true"]');
+    newEditableElement.appendChild(range.extractContents());
+    const selectWbrElement = newEditableElement.querySelector("wbr");
+    if (selectWbrElement && selectWbrElement.parentElement.tagName === "SPAN" && selectWbrElement.parentElement.innerHTML === "<wbr>") {
+        selectWbrElement.parentElement.outerHTML = "<wbr>";
+    }
+    const newHTML = newEditableElement.innerHTML.trimStart();
+    const newText = newEditableElement.textContent.trimStart();
+    // https://github.com/siyuan-note/siyuan/issues/10759
+    if (hasCodeBlockFence(newHTML, newText)) {
+        if (newHTML.indexOf("\n") === -1 &&
+            newHTML.replace(codeBlockMarkerRegExp, "`").replace(/^`{3,}/g, "").indexOf("`") > -1) {
+            // ```test` 不处理，正常渲染为段落块
+        } else {
+            let replaceNewHTML = newEditableElement.innerHTML
+                .replace(codeBlockFenceLineRegExp, "\n```").trim()
+                .replace(codeBlockFenceStartRegExp, "```");
+            if (!replaceNewHTML.endsWith("\n```")) {
+                replaceNewHTML += "\n```";
+            }
+            newEditableElement.innerHTML = replaceNewHTML;
+        }
+    }
     // https://github.com/siyuan-note/insider/issues/480
     newElement.innerHTML = protyle.lute.SpinBlockDOM(newElement.innerHTML);
 
@@ -384,21 +333,25 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
     enterElement.innerHTML = protyle.lute.SpinBlockDOM(editableElement.parentElement.outerHTML);
     const doOperation: IOperation[] = [];
     const undoOperation: IOperation[] = [];
+    let currentElement = blockElement;
     // 回车之前的块为 1\n\n2 时会产生多个块
+    const selectsElement: Element[] = [];
     Array.from(enterElement.children).forEach((item: HTMLElement) => {
         if (item.dataset.nodeId === id) {
-            editableElement.innerHTML = item.querySelector('[contenteditable="true"]').innerHTML;
+            blockElement.before(item);
+            blockElement.remove();
+            item.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
             doOperation.push({
                 action: "update",
-                data: blockElement.outerHTML,
+                data: item.outerHTML,
                 id,
             });
             undoOperation.push({
                 action: "update",
                 data: html,
                 id,
+                context: undoFocusContext,
             });
-            mathRender(editableElement);
         } else {
             doOperation.push({
                 action: "insert",
@@ -406,35 +359,345 @@ export const enter = (blockElement: HTMLElement, range: Range, protyle: IProtyle
                 id: item.dataset.nodeId,
                 nextID: id,
             });
-            blockElement.insertAdjacentElement("beforebegin", item);
+            currentElement.insertAdjacentElement("afterend", item);
             undoOperation.push({
                 action: "delete",
                 id: item.dataset.nodeId,
             });
+        }
+        if (item.dataset.type === "NodeBlockQueryEmbed") {
+            blockRender(protyle, item);
+        } else {
             mathRender(item);
         }
+        currentElement = item;
+        selectsElement.push(item);
     });
 
-    let previousElement = blockElement;
     Array.from(newElement.children).forEach((item: HTMLElement) => {
         const newId = item.getAttribute("data-node-id");
         doOperation.push({
             action: "insert",
             data: item.outerHTML,
             id: newId,
-            previousID: previousElement.getAttribute("data-node-id"),
+            previousID: currentElement.getAttribute("data-node-id"),
         });
         undoOperation.push({
             action: "delete",
             id: newId,
         });
-        previousElement.insertAdjacentElement("afterend", item);
-        mathRender(previousElement.nextElementSibling);
-        previousElement = item;
+        currentElement.insertAdjacentElement("afterend", item);
+        if (item.classList.contains("code-block")) {
+            highlightRender(item);
+        } else if (item.dataset.type === "NodeBlockQueryEmbed") {
+            blockRender(protyle, item);
+        } else {
+            mathRender(currentElement.nextElementSibling);
+        }
+        currentElement = item;
+        selectsElement.push(item);
     });
+    let parentElement = currentElement.parentElement;
+    if (parentElement.classList.contains("bq") && parentElement.childElementCount > 2 &&
+        currentElement.previousElementSibling.classList.contains("p") && currentElement.classList.contains("p") &&
+        currentElement.previousElementSibling.textContent.startsWith("[!") && parentHTML) {
+        const calloutHTML = protyle.lute.SpinBlockDOM(parentElement.outerHTML);
+        if (calloutHTML.indexOf('data-type="NodeCallout"') > -1) {
+            parentElement.insertAdjacentHTML("afterend", calloutHTML);
+            parentElement = parentElement.nextElementSibling as HTMLElement;
+            parentElement.previousElementSibling.remove();
+            mathRender(protyle.wysiwyg.element);
+            updateTransaction(protyle, parentElement, parentHTML);
+            focusByWbr(protyle.wysiwyg.element, range);
+            scrollCenter(protyle);
+            return true;
+        }
+    }
+    undoOperation.find((item, index) => {
+        if (item.action === "update") {
+            undoOperation.splice(index, 1);
+            undoOperation.push(item);
+            return true;
+        }
+    });
+    if (parentElement.classList.contains("sb") &&
+        parentElement.getAttribute("data-sb-layout") === "col") {
+        // 合并到同一个 transaction，避免新块 id 在第二个 transaction 中找不到
+        const sbOperations = await turnsIntoOneTransaction({
+            protyle,
+            selectsElement,
+            type: "BlocksMergeSuperBlock",
+            level: "row",
+            unfocus: true,
+            getOperations: true,
+        });
+        doOperation.push(...sbOperations.doOperations);
+        undoOperation.splice(0, 0, ...sbOperations.undoOperations);
+    }
     transaction(protyle, doOperation, undoOperation);
-    focusBlock(blockElement.nextElementSibling);
+    focusByWbr(currentElement, range);
     scrollCenter(protyle);
+    return true;
+};
+
+const getEmbedListEnterMode = (blockElement: HTMLElement, embedContext: IEmbedChildOperationContext) => {
+    const listItemElement = blockElement.parentElement;
+    // 单独查询列表项时外层列表是渲染器补充的，回车只能在目标列表项内部创建普通子块。
+    if (listItemElement === embedContext.targetElement) {
+        return "block";
+    }
+    const listElement = listItemElement.parentElement;
+    const editableElement = getContenteditableElement(blockElement);
+    const exitsList = ["", "\n"].includes(editableElement.textContent) &&
+        blockElement.previousElementSibling.classList.contains("protyle-action") &&
+        !blockElement.querySelector("img");
+    if (exitsList && listElement.parentElement === embedContext.resultElement) {
+        return "none";
+    }
+    return embedContext.boundaryElement.contains(exitsList ? listElement.parentElement : listElement) ? "list" : "none";
+};
+
+const listEnter = async (protyle: IProtyle, blockElement: HTMLElement, range: Range) => {
+    const listItemElement = blockElement.parentElement;
+    const editableElement = getContenteditableElement(blockElement);
+    if (// \n 是因为 https://github.com/siyuan-note/siyuan/issues/3846
+        ["", "\n"].includes(editableElement.textContent) &&
+        blockElement.previousElementSibling.classList.contains("protyle-action") &&
+        !blockElement.querySelector("img") // https://ld246.com/article/1651820644238
+    ) {
+        if (listItemElement.nextElementSibling?.classList.contains("protyle-attr")) {
+            await listOutdent(protyle, [blockElement.parentElement], range);
+            return true;
+        } else if (!listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
+            // 打断列表
+            await breakList(protyle, blockElement, range);
+            return true;
+        }
+    }
+
+    const position = getSelectionOffset(editableElement, protyle.wysiwyg.element, range);
+    if (range.toString() === "" && position.start === 0 &&
+        // 段首为图片是 start 也为 0
+        !hasPreviousSibling(range.startContainer)) {
+        // 段首换行
+        if (listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
+            return true;
+        }
+        // https://github.com/siyuan-note/siyuan/issues/8935
+        const wbrElement = document.createElement("wbr");
+        range.insertNode(wbrElement);
+        const listElement = listItemElement.parentElement;
+        const html = listElement.outerHTML;
+        const listStart = getOrderedListStart(listElement);
+        wbrElement.remove();
+        let newElement = genListItemElement(listItemElement, -1, true);
+        if (!blockElement.previousElementSibling.classList.contains("protyle-action")) {
+            // 列表项中有多个块，最后一个块为空，换行应进行缩进
+            if (getContenteditableElement(blockElement).textContent !== "") {
+                return false;
+            }
+            blockElement.remove();
+            newElement = genListItemElement(listItemElement, -1, true);
+            listItemElement.insertAdjacentElement("afterend", newElement);
+        } else if (getContenteditableElement(blockElement).textContent === "") {
+            listItemElement.insertAdjacentElement("afterend", newElement);
+        } else {
+            listItemElement.insertAdjacentElement("beforebegin", newElement);
+        }
+        if (listItemElement.getAttribute("data-subtype") === "o") {
+            updateListOrder(listElement, listStart);
+        }
+        updateTransaction(protyle, listElement, html);
+        focusByWbr(newElement, range);
+        scrollCenter(protyle);
+        removeEmptyNode(newElement);
+        return true;
+    }
+
+    const shouldUpdateParentList = listItemElement.getAttribute("data-subtype") === "o" &&
+        listItemElement.parentElement.classList.contains("protyle-wysiwyg");
+    const focusedParentListElement = shouldUpdateParentList ?
+        await getFocusedParentOrderedList(protyle, listItemElement.parentElement) : undefined;
+    if (shouldUpdateParentList && !focusedParentListElement) {
+        return true;
+    }
+    if (!listItemElement.isConnected) {
+        return true;
+    }
+    const subListElement = listItemElement.querySelector(".list");
+    let newElement;
+    if (subListElement && listItemElement.getAttribute("fold") !== "1" &&
+        // 子列表下的段落块回车 https://ld246.com/article/1623919354587
+        blockElement.nextElementSibling === subListElement) {
+        // 含有子列表的换行
+        if (position.end >= editableElement.textContent.length -
+            // 数学公式结尾会有 zwsp https://github.com/siyuan-note/siyuan/issues/6679
+            (editableElement.textContent.endsWith(Constants.ZWSP) ? 1 : 0)) {
+            // 段末换行，在子列表中插入
+            range.insertNode(document.createElement("wbr"));
+            const html = listItemElement.outerHTML;
+            const listStart = getOrderedListStart(subListElement);
+            blockElement.querySelector("wbr").remove();
+            newElement = genListItemElement(subListElement.firstElementChild, -1, true);
+            subListElement.firstElementChild.before(newElement);
+            if (subListElement.getAttribute("data-subtype") === "o") {
+                updateListOrder(subListElement, listStart);
+            }
+            updateTransaction(protyle, listItemElement, html);
+            focusByWbr(listItemElement, range);
+            scrollCenter(protyle);
+        } else {
+            // 文字中间换行
+            range.insertNode(document.createElement("wbr"));
+            const listItemHTML = listItemElement.outerHTML;
+            const html = listItemElement.parentElement.outerHTML;
+            if (range.toString() !== "") {
+                range.extractContents();
+                range.insertNode(document.createElement("wbr"));
+            }
+            range.setEndAfter(editableElement.lastChild);
+            newElement = genListItemElement(listItemElement, 0, false);
+            const newEditElement = getContenteditableElement(newElement);
+            newEditElement.appendChild(range.extractContents());
+            const subWbrElement = newEditElement.querySelector("wbr");
+            if (subWbrElement && subWbrElement.parentElement.tagName === "SPAN" && subWbrElement.parentElement.innerHTML === "<wbr>") {
+                subWbrElement.parentElement.outerHTML = "<wbr>";
+            }
+            newEditElement.parentElement.outerHTML = protyle.lute.SpinBlockDOM(newEditElement.parentElement.outerHTML);
+            let subListNextElement = subListElement.nextElementSibling;
+            newElement.lastElementChild.before(subListElement);
+            // https://github.com/siyuan-note/siyuan/issues/13016
+            while (!subListNextElement.classList.contains("protyle-attr")) {
+                subListNextElement = subListNextElement.nextElementSibling;
+                newElement.lastElementChild.before(subListNextElement.previousElementSibling);
+            }
+            listItemElement.insertAdjacentElement("afterend", newElement);
+            blockRender(protyle, newElement);
+            mathRender(newElement);
+            processRender(newElement);
+            if (listItemElement.getAttribute("data-subtype") === "o") {
+                updateListOrder(listItemElement.parentElement);
+            }
+            if (listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
+                const orderOperations = focusedParentListElement ?
+                    getFocusedOrderedListInsertOperations(focusedParentListElement, listItemElement, newElement) :
+                    {doOperations: [], undoOperations: []};
+                listItemElement.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
+                transaction(protyle, [{
+                    action: "update",
+                    data: listItemElement.outerHTML,
+                    id: listItemElement.getAttribute("data-node-id")
+                }, {
+                    action: "insert",
+                    id: newElement.getAttribute("data-node-id"),
+                    data: newElement.outerHTML,
+                    previousID: listItemElement.getAttribute("data-node-id")
+                }, ...orderOperations.doOperations], [{
+                    action: "delete",
+                    id: newElement.getAttribute("data-node-id"),
+                }, {
+                    action: "update",
+                    data: listItemHTML,
+                    id: listItemElement.getAttribute("data-node-id")
+                }, ...orderOperations.undoOperations]);
+            } else {
+                updateTransaction(protyle, listItemElement.parentElement, html);
+            }
+            focusByWbr(newElement, range);
+            scrollCenter(protyle);
+        }
+        removeEmptyNode(newElement);
+        return true;
+    }
+    if ((range.toString() === "" || range.toString() === Constants.ZWSP) && range.startContainer.nodeType === 3 && range.startOffset === 0) {
+        // 图片后的零宽空格前回车 https://github.com/siyuan-note/siyuan/issues/5690
+        // 列表中的图片后双击换行图片光标错误 https://ld246.com/article/1660987186727/comment/1662181221732?r=Vanessa#comments
+        let nextSibling = range.startContainer;
+        while (nextSibling) {
+            if (nextSibling.textContent === Constants.ZWSP) {
+                range.setStart(nextSibling, 1);
+                range.collapse(false);
+                break;
+            } else {
+                nextSibling = nextSibling.nextSibling;
+            }
+        }
+    }
+    range.insertNode(document.createElement("wbr"));
+    const listItemHTML = listItemElement.outerHTML;
+    const oldHTML = listItemElement.parentElement.outerHTML;
+    if (range.toString() !== "") {
+        // 选中数学公式后回车取消选中 https://github.com/siyuan-note/siyuan/issues/12637#issuecomment-2381106949
+        const mathElement = hasClosestByAttribute(range.startContainer, "data-type", "inline-math");
+        if (mathElement) {
+            const nextSibling = hasNextSibling(mathElement);
+            if (nextSibling) {
+                range = getSelection().getRangeAt(0);
+                range.setEnd(nextSibling, nextSibling.textContent.startsWith(Constants.ZWSP) ? 1 : 0);
+                range.collapse(false);
+            }
+            mathElement.querySelector("wbr")?.remove();
+            return true;
+        }
+        range.extractContents();
+        range.insertNode(document.createElement("wbr"));
+    }
+    if (editableElement.lastChild) {
+        range.setEndAfter(editableElement.lastChild);
+    }
+    newElement = genListItemElement(listItemElement, 0, false);
+    const newEditableElement = getContenteditableElement(newElement);
+    newEditableElement.appendChild(range.extractContents());
+    const selectWbrElement = newEditableElement.querySelector("wbr");
+    if (selectWbrElement && selectWbrElement.parentElement.tagName === "SPAN" && selectWbrElement.parentElement.innerHTML === "<wbr>") {
+        selectWbrElement.parentElement.outerHTML = "<wbr>";
+    }
+    // 回车移除空元素 https://github.com/siyuan-note/insider/issues/480
+    // https://github.com/siyuan-note/siyuan/issues/12273
+    // 文字和图片中间回车后图片前需添加 zwsp
+    newEditableElement.parentElement.outerHTML = protyle.lute.SpinBlockDOM(newEditableElement.parentElement.outerHTML);
+    listItemElement.insertAdjacentElement("afterend", newElement);
+    blockRender(protyle, newElement);
+    mathRender(newElement);
+    processRender(newElement);
+    // https://github.com/siyuan-note/siyuan/issues/3850
+    // https://github.com/siyuan-note/siyuan/issues/6018
+    // img 后有文字，在 img 后换行
+    editableElement.parentElement.outerHTML = protyle.lute.SpinBlockDOM(editableElement.parentElement.outerHTML);
+    blockRender(protyle, listItemElement);
+    mathRender(listItemElement);
+    processRender(listItemElement);
+    if (listItemElement.getAttribute("data-subtype") === "o") {
+        updateListOrder(listItemElement.parentElement);
+    }
+    if (listItemElement.parentElement.classList.contains("protyle-wysiwyg")) {
+        const orderOperations = focusedParentListElement ?
+            getFocusedOrderedListInsertOperations(focusedParentListElement, listItemElement, newElement) :
+            {doOperations: [], undoOperations: []};
+        listItemElement.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
+        transaction(protyle, [{
+            action: "update",
+            id: listItemElement.getAttribute("data-node-id"),
+            data: listItemElement.outerHTML,
+        }, {
+            action: "insert",
+            id: newElement.getAttribute("data-node-id"),
+            data: newElement.outerHTML,
+            previousID: listItemElement.getAttribute("data-node-id")
+        }, ...orderOperations.doOperations], [{
+            action: "delete",
+            id: newElement.getAttribute("data-node-id"),
+        }, {
+            action: "update",
+            id: listItemElement.getAttribute("data-node-id"),
+            data: listItemHTML
+        }, ...orderOperations.undoOperations]);
+    } else {
+        updateTransaction(protyle, listItemElement.parentElement, oldHTML);
+    }
+    focusByWbr(newElement, range);
+    scrollCenter(protyle);
+    removeEmptyNode(newElement);
     return true;
 };
 
@@ -451,18 +714,26 @@ const removeEmptyNode = (newElement: Element) => {
 export const softEnter = (range: Range, nodeElement: HTMLElement, protyle: IProtyle) => {
     let startElement = range.startContainer as HTMLElement;
     const nextSibling = hasNextSibling(startElement) as Element;
-    // 图片之前软换行
-    if (nextSibling && nextSibling.nodeType !== 3 && nextSibling.classList.contains("img")) {
-        nextSibling.insertAdjacentHTML("beforebegin", "<wbr>");
-        const oldHTML = nodeElement.outerHTML;
-        nextSibling.previousElementSibling.remove();
-        const newlineNode = document.createTextNode("\n");
-        startElement.after(document.createTextNode(Constants.ZWSP));
-        startElement.after(newlineNode);
-        range.selectNode(newlineNode);
-        range.collapse(false);
-        updateTransaction(protyle, nodeElement.getAttribute("data-node-id"), nodeElement.outerHTML, oldHTML);
+    if (nodeElement.getAttribute("data-type") === "NodeAttributeView") {
         return true;
+    }
+    if (nextSibling && nextSibling.nodeType !== 3) {
+        const textPosition = getSelectionOffset(range.startContainer, protyle.wysiwyg.element, range);
+        if (textPosition.end === range.endContainer.textContent.length) {
+            // 图片之前软换行 || 数学公式之前软换行 https://github.com/siyuan-note/siyuan/issues/13621
+            if (nextSibling.classList.contains("img") || nextSibling.getAttribute("data-type") === "inline-math") {
+                nextSibling.insertAdjacentHTML("beforebegin", "<wbr>");
+                const oldHTML = nodeElement.outerHTML;
+                nextSibling.previousElementSibling.remove();
+                const newlineNode = document.createTextNode("\n");
+                startElement.after(document.createTextNode(Constants.ZWSP));
+                startElement.after(newlineNode);
+                range.selectNode(newlineNode);
+                range.collapse(false);
+                updateTransaction(protyle, nodeElement, oldHTML);
+                return true;
+            }
+        }
     }
     // 行内元素末尾软换行 https://github.com/siyuan-note/insider/issues/886
     if (startElement.nodeType === 3) {
@@ -510,5 +781,5 @@ const addNewLineToEnd = (range: Range, nodeElement: HTMLElement, protyle: IProty
     }
     range.collapse(true);
     focusByRange(range);
-    updateTransaction(protyle, nodeElement.getAttribute("data-node-id"), nodeElement.outerHTML, oldHTML);
+    updateTransaction(protyle, nodeElement, oldHTML);
 };

@@ -3,15 +3,21 @@ import {Constants} from "../constants";
 import {ipcRenderer} from "electron";
 /// #endif
 import {processMessage} from "./processMessage";
-import {kernelError} from "../dialog/processSystem";
+import {kernelError} from "./kernelFault";
 
-export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketData) => void, headers?: IObject) => {
+export const fetchPost = (
+    url: string,
+    data?: any,
+    cb?: (response: IWebSocketData) => void,
+    headers?: Record<string, string>,
+    failCallback?: (response: IWebSocketData) => void,
+    signal?: AbortSignal) => {
     const init: RequestInit = {
         method: "POST",
     };
     if (data) {
         if (["/api/search/searchRefBlock", "/api/graph/getGraph", "/api/graph/getLocalGraph"].includes(url)) {
-            window.siyuan.reqIds[url] = new Date().getTime();
+            window.siyuan.reqIds[url] = Date.now();
             if (data.type === "local" && url === "/api/graph/getLocalGraph") {
                 // 当打开文档A的关系图、关系图、文档A后刷新，由于防止请求重复处理，文档A关系图无法渲染。
             } else {
@@ -20,7 +26,7 @@ export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketDat
         }
         // 并发导出后端接受顺序不一致
         if (url === "/api/transactions") {
-            data.reqId = new Date().getTime();
+            data.reqId = Date.now();
         }
         if (data instanceof FormData) {
             init.body = data;
@@ -31,21 +37,45 @@ export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketDat
     if (headers) {
         init.headers = headers;
     }
-    fetch(url, init).then((response) => {
-        if (response.status === 404) {
-            return {
-                data: null,
-                msg: response.statusText,
-                code: response.status,
-            };
-        } else {
-            if (response.headers.get("content-type")?.indexOf("application/json") > -1) {
-                return response.json();
-            } else {
-                return response.text();
-            }
+    if (signal) {
+        init.signal = signal;
+    }
+    let isGetFile202 = false;
+    return fetch(url, init).then((response) => {
+        switch (response.status) {
+            case 403:
+            case 404:
+                return {
+                    data: null,
+                    msg: response.statusText,
+                    code: -response.status,
+                };
+            case 401:
+                // 返回鉴权失败的话直接刷新页面，避免用户在当前页面操作 https://github.com/siyuan-note/siyuan/issues/15163
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+                return {
+                    data: null,
+                    msg: response.statusText,
+                    code: -response.status,
+                };
+            default:
+                // /api/file/getFile 接口返回202时表示文件没有正常读取
+                if (response.status === 202 && url === "/api/file/getFile") {
+                    isGetFile202 = true;
+                }
+                if (response.headers.get("content-type")?.indexOf("application/json") > -1) {
+                    return response.json();
+                } else {
+                    return response.text();
+                }
         }
     }).then((response: IWebSocketData) => {
+        if (failCallback && url === "/api/file/getFile" && isGetFile202) {
+            failCallback(response);
+            return;
+        }
         if (typeof response === "string") {
             if (cb) {
                 cb(response);
@@ -65,7 +95,18 @@ export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketDat
             cb(response);
         }
     }).catch((e) => {
-        console.warn("fetch post error", e);
+        if (e?.name === "AbortError") {
+            return;
+        }
+        if (failCallback && url === "/api/file/getFile") {
+            failCallback({
+                data: null,
+                msg: e.message,
+                code: 400,
+            });
+            return;
+        }
+        console.warn("fetch post failed [" + e + "], url [" + url + "]");
         if (url === "/api/transactions" && (e.message === "Failed to fetch" || e.message === "Unexpected end of JSON input")) {
             kernelError();
             return;
@@ -80,16 +121,25 @@ export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketDat
     });
 };
 
-export const fetchSyncPost = async (url: string, data?: any) => {
+export const fetchSyncPost = async (url: string, data?: any, headers?: Record<string, string>, process = true) => {
     const init: RequestInit = {
         method: "POST",
     };
+    if (headers) {
+        init.headers = headers;
+    }
     if (data) {
-        init.body = JSON.stringify(data);
+        if (data instanceof FormData) {
+            init.body = data;
+        } else {
+            init.body = JSON.stringify(data);
+        }
     }
     const res = await fetch(url, init);
     const res2 = await res.json() as IWebSocketData;
-    processMessage(res2);
+    if (process) {
+        processMessage(res2);
+    }
     return res2;
 };
 

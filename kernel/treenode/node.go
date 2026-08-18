@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -18,25 +18,43 @@ package treenode
 
 import (
 	"bytes"
-	"github.com/siyuan-note/siyuan/kernel/av"
-	"github.com/siyuan-note/siyuan/kernel/cache"
 	"strings"
 	"sync"
-	"text/template"
-	"time"
 
 	"github.com/88250/gulu"
 	"github.com/88250/lute"
 	"github.com/88250/lute/ast"
 	"github.com/88250/lute/editor"
 	"github.com/88250/lute/html"
-	"github.com/88250/lute/lex"
 	"github.com/88250/lute/parse"
 	"github.com/88250/lute/render"
 	"github.com/88250/vitess-sqlparser/sqlparser"
 	"github.com/siyuan-note/logging"
+	"github.com/siyuan-note/siyuan/kernel/cache"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
+
+func ResetNodeID(node *ast.Node) {
+	if nil == node {
+		return
+	}
+
+	node.ID = ast.NewNodeID()
+	node.SetIALAttr("id", node.ID)
+	resetUpdatedByID(node)
+}
+
+func resetUpdatedByID(node *ast.Node) {
+	created := util.TimeFromID(node.ID)
+	updated := node.IALAttr("updated")
+	if "" == updated {
+		updated = created
+	}
+	if updated < created {
+		updated = created
+	}
+	node.SetIALAttr("updated", updated)
+}
 
 func GetEmbedBlockRef(embedNode *ast.Node) (blockRefID string) {
 	if nil == embedNode || ast.NodeBlockQueryEmbed != embedNode.Type {
@@ -48,43 +66,47 @@ func GetEmbedBlockRef(embedNode *ast.Node) (blockRefID string) {
 		return
 	}
 
-	stmt := scriptNode.TokensStr()
+	return GetEmbedBlockRefID(scriptNode.TokensStr())
+}
+
+func GetEmbedBlockRefID(stmt string) (blockRefID string) {
 	parsedStmt, err := sqlparser.Parse(stmt)
-	if nil != err {
+	if err != nil {
 		return
 	}
 
-	switch parsedStmt.(type) {
-	case *sqlparser.Select:
-		slct := parsedStmt.(*sqlparser.Select)
-		if nil == slct.Where || nil == slct.Where.Expr {
-			return
-		}
+	slct, ok := parsedStmt.(*sqlparser.Select)
+	if !ok || nil == slct.Where || nil == slct.Where.Expr {
+		return
+	}
 
-		switch slct.Where.Expr.(type) {
-		case *sqlparser.ComparisonExpr: // WHERE id = '20060102150405-1a2b3c4'
-			comp := slct.Where.Expr.(*sqlparser.ComparisonExpr)
-			switch comp.Left.(type) {
-			case *sqlparser.ColName:
-				col := comp.Left.(*sqlparser.ColName)
-				if nil == col || "id" != col.Name.Lowered() {
-					return
-				}
-			}
-			switch comp.Right.(type) {
-			case *sqlparser.SQLVal:
-				val := comp.Right.(*sqlparser.SQLVal)
-				if nil == val || sqlparser.StrVal != val.Type {
-					return
-				}
-
-				idVal := string(val.Val)
-				if !ast.IsNodeIDPattern(idVal) {
-					return
-				}
-				blockRefID = idVal
-			}
+	expr := slct.Where.Expr
+	for {
+		paren, isParen := expr.(*sqlparser.ParenExpr)
+		if !isParen {
+			break
 		}
+		expr = paren.Expr
+	}
+
+	comp, ok := expr.(*sqlparser.ComparisonExpr) // 仅匹配 WHERE id = '20060102150405-1a2b3c4'
+	if !ok || sqlparser.EqualStr != comp.Operator {
+		return
+	}
+
+	col, ok := comp.Left.(*sqlparser.ColName)
+	if !ok || nil == col || "id" != col.Name.Lowered() {
+		return
+	}
+
+	val, ok := comp.Right.(*sqlparser.SQLVal)
+	if !ok || nil == val || sqlparser.StrVal != val.Type {
+		return
+	}
+
+	idVal := string(val.Val)
+	if ast.IsNodeIDPattern(idVal) {
+		blockRefID = idVal
 	}
 	return
 }
@@ -104,7 +126,14 @@ func IsBlockRef(n *ast.Node) bool {
 	if nil == n {
 		return false
 	}
-	return ast.NodeTextMark == n.Type && n.IsTextMarkType("block-ref")
+	return (ast.NodeTextMark == n.Type && n.IsTextMarkType("block-ref")) || ast.NodeBlockRef == n.Type
+}
+
+func IsBlockLink(n *ast.Node) bool {
+	if nil == n {
+		return false
+	}
+	return ast.NodeTextMark == n.Type && n.IsTextMarkType("a") && strings.HasPrefix(n.TextMarkAHref, "siyuan://blocks/")
 }
 
 func IsFileAnnotationRef(n *ast.Node) bool {
@@ -120,7 +149,7 @@ func IsEmbedBlockRef(n *ast.Node) bool {
 
 func FormatNode(node *ast.Node, luteEngine *lute.Lute) string {
 	markdown, err := lute.FormatNodeSync(node, luteEngine.ParseOptions, luteEngine.RenderOptions)
-	if nil != err {
+	if err != nil {
 		root := TreeRoot(node)
 		logging.LogFatalf(logging.ExitCodeFatal, "format node [%s] in tree [%s] failed: %s", node.ID, root.ID, err)
 	}
@@ -129,7 +158,7 @@ func FormatNode(node *ast.Node, luteEngine *lute.Lute) string {
 
 func ExportNodeStdMd(node *ast.Node, luteEngine *lute.Lute) string {
 	markdown, err := lute.ProtyleExportMdNodeSync(node, luteEngine.ParseOptions, luteEngine.RenderOptions)
-	if nil != err {
+	if err != nil {
 		root := TreeRoot(node)
 		logging.LogFatalf(logging.ExitCodeFatal, "export markdown for node [%s] in tree [%s] failed: %s", node.ID, root.ID, err)
 	}
@@ -168,129 +197,18 @@ func IsNodeOCRed(node *ast.Node) (ret bool) {
 	return
 }
 
-func NodeStaticContent(node *ast.Node, excludeTypes []string, includeTextMarkATitleURL, includeAssetPath, fullAttrView bool) string {
-	if nil == node {
-		return ""
+func GetNodeSrcTokens(n *ast.Node) (ret string) {
+	if index := bytes.Index(n.Tokens, []byte("src=\"")); 0 < index {
+		src := n.Tokens[index+len("src=\""):]
+		if before, _, ok := bytes.Cut(src, []byte("\"")); ok {
+			// src 为空时闭合引号紧随其后，closeQuote 为 0 也是合法情况
+			ret = strings.TrimSpace(string(before))
+			return
+		}
+
+		logging.LogWarnf("src is missing the closing double quote in tree [%s] ", n.Box+n.Path)
 	}
-
-	if ast.NodeDocument == node.Type {
-		return node.IALAttr("title")
-	}
-
-	if ast.NodeAttributeView == node.Type {
-		if fullAttrView {
-			return getAttributeViewContent(node.AttributeViewID)
-		}
-
-		return getAttributeViewName(node.AttributeViewID)
-	}
-
-	buf := bytes.Buffer{}
-	buf.Grow(4096)
-	lastSpace := false
-	ast.Walk(node, func(n *ast.Node, entering bool) ast.WalkStatus {
-		if !entering {
-			return ast.WalkContinue
-		}
-
-		if n.IsContainerBlock() {
-			if !lastSpace {
-				buf.WriteByte(' ')
-				lastSpace = true
-			}
-			return ast.WalkContinue
-		}
-
-		if gulu.Str.Contains(n.Type.String(), excludeTypes) {
-			return ast.WalkContinue
-		}
-
-		switch n.Type {
-		case ast.NodeTableCell:
-			// 表格块写入数据库表时在单元格之间添加空格 https://github.com/siyuan-note/siyuan/issues/7654
-			if 0 < buf.Len() && ' ' != buf.Bytes()[buf.Len()-1] {
-				buf.WriteByte(' ')
-			}
-		case ast.NodeImage:
-			linkDest := n.ChildByType(ast.NodeLinkDest)
-			var linkDestStr, ocrText string
-			if nil != linkDest {
-				linkDestStr = linkDest.TokensStr()
-				ocrText = util.GetAssetText(linkDestStr, false)
-			}
-
-			linkText := n.ChildByType(ast.NodeLinkText)
-			if nil != linkText {
-				buf.Write(linkText.Tokens)
-				buf.WriteByte(' ')
-			}
-			if "" != ocrText {
-				buf.WriteString(ocrText)
-				buf.WriteByte(' ')
-			}
-			if nil != linkDest {
-				if !bytes.HasPrefix(linkDest.Tokens, []byte("assets/")) || includeAssetPath {
-					buf.Write(linkDest.Tokens)
-					buf.WriteByte(' ')
-				}
-			}
-			if linkTitle := n.ChildByType(ast.NodeLinkTitle); nil != linkTitle {
-				buf.Write(linkTitle.Tokens)
-			}
-			return ast.WalkSkipChildren
-		case ast.NodeLinkText:
-			buf.Write(n.Tokens)
-			buf.WriteByte(' ')
-		case ast.NodeLinkDest:
-			buf.Write(n.Tokens)
-			buf.WriteByte(' ')
-		case ast.NodeLinkTitle:
-			buf.Write(n.Tokens)
-		case ast.NodeText, ast.NodeCodeBlockCode, ast.NodeMathBlockContent, ast.NodeHTMLBlock:
-			tokens := n.Tokens
-			if IsChartCodeBlockCode(n) {
-				// 图表块的内容在数据库 `blocks` 表 `content` 字段中被转义 https://github.com/siyuan-note/siyuan/issues/6326
-				tokens = html.UnescapeHTML(tokens)
-			}
-			buf.Write(tokens)
-		case ast.NodeTextMark:
-			for _, excludeType := range excludeTypes {
-				if strings.HasPrefix(excludeType, "NodeTextMark-") {
-					if n.IsTextMarkType(excludeType[len("NodeTextMark-"):]) {
-						return ast.WalkContinue
-					}
-				}
-			}
-
-			if n.IsTextMarkType("tag") {
-				buf.WriteByte('#')
-			}
-			buf.WriteString(n.Content())
-			if n.IsTextMarkType("tag") {
-				buf.WriteByte('#')
-			}
-			if n.IsTextMarkType("a") && includeTextMarkATitleURL {
-				// 搜索不到超链接元素的 URL 和标题 https://github.com/siyuan-note/siyuan/issues/7352
-				if "" != n.TextMarkATitle {
-					buf.WriteString(" " + html.UnescapeHTMLStr(n.TextMarkATitle))
-				}
-
-				if !strings.HasPrefix(n.TextMarkAHref, "assets/") || includeAssetPath {
-					buf.WriteString(" " + html.UnescapeHTMLStr(n.TextMarkAHref))
-				}
-			}
-		case ast.NodeBackslash:
-			buf.WriteByte(lex.ItemBackslash)
-		case ast.NodeBackslashContent:
-			buf.Write(n.Tokens)
-		}
-		lastSpace = false
-		return ast.WalkContinue
-	})
-
-	// 这里不要 trim，否则无法搜索首尾空格
-	// Improve search and replace for spaces https://github.com/siyuan-note/siyuan/issues/10231
-	return buf.String()
+	return
 }
 
 func FirstLeafBlock(node *ast.Node) (ret *ast.Node) {
@@ -310,11 +228,11 @@ func FirstLeafBlock(node *ast.Node) (ret *ast.Node) {
 
 func CountBlockNodes(node *ast.Node) (ret int) {
 	ast.Walk(node, func(n *ast.Node, entering bool) ast.WalkStatus {
-		if !entering || !n.IsBlock() || ast.NodeList == n.Type || ast.NodeBlockquote == n.Type || ast.NodeSuperBlock == n.Type {
+		if !entering || !n.IsBlock() || ast.NodeList == n.Type || ast.NodeBlockquote == n.Type || ast.NodeSuperBlock == n.Type || ast.NodeCallout == n.Type {
 			return ast.WalkContinue
 		}
 
-		if "1" == n.IALAttr("fold") {
+		if IsSelfFolded(n) {
 			ret++
 			return ast.WalkSkipChildren
 		}
@@ -325,17 +243,42 @@ func CountBlockNodes(node *ast.Node) (ret int) {
 	return
 }
 
-func ParentNodes(node *ast.Node) (parents []*ast.Node) {
-	const maxDepth = 256
+// ParentNodesWithHeadings 返回所有父级节点。
+// 注意:返回的父级节点包括了标题节点，并且不保证父级层次顺序。
+func ParentNodesWithHeadings(node *ast.Node) (parents []*ast.Node) {
+	const maxDepth = 255
 	i := 0
-	for n := node.Parent; nil != n; n = n.Parent {
-		i++
-		parents = append(parents, n)
-		if ast.NodeDocument == n.Type {
-			return
-		}
+	for n := node; nil != n; n = n.Parent {
+		parent := n.Parent
 		if maxDepth < i {
 			logging.LogWarnf("parent nodes of node [%s] is too deep", node.ID)
+			return
+		}
+		i++
+
+		if nil == parent {
+			return
+		}
+
+		// 标题下方块编辑后刷新标题块更新时间
+		// The heading block update time is refreshed after editing the blocks under the heading https://github.com/siyuan-note/siyuan/issues/11374
+		parentHeadingLevel := 7
+		if ast.NodeHeading == n.Type {
+			parentHeadingLevel = n.HeadingLevel
+		}
+		for prev := n.Previous; nil != prev; prev = prev.Previous {
+			if ast.NodeHeading == prev.Type {
+				if prev.HeadingLevel >= parentHeadingLevel {
+					break
+				}
+
+				parents = append(parents, prev)
+				parentHeadingLevel = prev.HeadingLevel
+			}
+		}
+
+		parents = append(parents, parent)
+		if ast.NodeDocument == parent.Type {
 			return
 		}
 	}
@@ -364,6 +307,24 @@ func ParentBlock(node *ast.Node) *ast.Node {
 	for p := node.Parent; nil != p; p = p.Parent {
 		if "" != p.ID && p.IsBlock() {
 			return p
+		}
+	}
+	return nil
+}
+
+func PreviousBlock(node *ast.Node) *ast.Node {
+	for n := node.Previous; nil != n; n = n.Previous {
+		if "" != n.ID && n.IsBlock() {
+			return n
+		}
+	}
+	return nil
+}
+
+func NextBlock(node *ast.Node) *ast.Node {
+	for n := node.Next; nil != n; n = n.Next {
+		if "" != n.ID && n.IsBlock() {
+			return n
 		}
 	}
 	return nil
@@ -402,6 +363,9 @@ func GetDocTitleImgPath(root *ast.Node) (ret string) {
 
 	start := strings.Index(titleImg, background) + len(background)
 	end := strings.LastIndex(titleImg, ")")
+	if end < start {
+		return
+	}
 	ret = titleImg[start:end]
 	ret = strings.TrimPrefix(ret, "\"")
 	ret = strings.TrimPrefix(ret, "'")
@@ -431,6 +395,7 @@ var typeAbbrMap = map[string]string{
 	"NodeThematicBreak":    "tb",
 	"NodeVideo":            "video",
 	"NodeAudio":            "audio",
+	"NodeCallout":          "callout",
 	// 行级元素
 	"NodeText":     "text",
 	"NodeImage":    "img",
@@ -486,22 +451,72 @@ func SubTypeAbbr(n *ast.Node) string {
 		if 6 == n.HeadingLevel {
 			return "h6"
 		}
+	case ast.NodeCallout:
+		return n.CalloutType
 	}
 	return ""
 }
 
 var DynamicRefTexts = sync.Map{}
 
+func dynamicRefTextsKey(defBlockID, boxID string) string {
+	return boxID + "\x00" + defBlockID
+}
+
 func SetDynamicBlockRefText(blockRef *ast.Node, refText string) {
 	if !IsBlockRef(blockRef) {
 		return
+	}
+
+	if ast.NodeBlockRef == blockRef.Type {
+		if refID := blockRef.ChildByType(ast.NodeBlockRefID); nil != refID {
+			refID.InsertAfter(&ast.Node{Type: ast.NodeBlockRefDynamicText, Tokens: []byte(refText)})
+			refID.InsertAfter(&ast.Node{Type: ast.NodeBlockRefSpace})
+		}
+		return
+	}
+
+	refText = strings.TrimSpace(refText)
+	if "" == refText {
+		refText = blockRef.TextMarkBlockRefID
 	}
 
 	blockRef.TextMarkBlockRefSubtype = "d"
 	blockRef.TextMarkTextContent = refText
 
 	// 偶发编辑文档标题后引用处的动态锚文本不更新 https://github.com/siyuan-note/siyuan/issues/5891
-	DynamicRefTexts.Store(blockRef.TextMarkBlockRefID, refText)
+	defID := blockRef.TextMarkBlockRefID
+	DynamicRefTexts.Store(defID, refText)
+	// 同时以 box-aware key 存储（如果节点有 box 上下文）
+	if blockRef.Box != "" {
+		DynamicRefTexts.Store(dynamicRefTextsKey(defID, blockRef.Box), refText)
+	}
+}
+
+func GetDynamicRefText(defBlockID, boxID string) string {
+	if boxID != "" {
+		if v, ok := DynamicRefTexts.Load(dynamicRefTextsKey(defBlockID, boxID)); ok {
+			return v.(string)
+		}
+	}
+	// 回退到无 boxID 的旧 key（兼容旧数据/无 box 上下文的调用）
+	if v, ok := DynamicRefTexts.Load(defBlockID); ok {
+		return v.(string)
+	}
+	return ""
+}
+
+// RemoveDynamicRefTexts 删除指定 box 的所有动态引用锚文本缓存。
+func RemoveDynamicRefTexts(boxID string) {
+	prefix := boxID + "\x00"
+	DynamicRefTexts.Range(func(k, _ any) bool {
+		if key, ok := k.(string); ok {
+			if strings.HasPrefix(key, prefix) {
+				DynamicRefTexts.Delete(k)
+			}
+		}
+		return true
+	})
 }
 
 func IsChartCodeBlockCode(code *ast.Node) bool {
@@ -514,516 +529,42 @@ func IsChartCodeBlockCode(code *ast.Node) bool {
 	return render.NoHighlight(language)
 }
 
-func GetAttributeViewName(avID string) (name string) {
-	if "" == avID {
-		return
-	}
-
-	attrView, err := av.ParseAttributeView(avID)
-	if nil != err {
-		logging.LogErrorf("parse attribute view [%s] failed: %s", avID, err)
-		return
-	}
-
-	buf := bytes.Buffer{}
-	for _, v := range attrView.Views {
-		buf.WriteString(v.Name)
-		buf.WriteByte(' ')
-	}
-
-	name = strings.TrimSpace(buf.String())
-	return
-}
-
-func getAttributeViewName(avID string) (name string) {
-	if "" == avID {
-		return
-	}
-
-	attrView, err := av.ParseAttributeView(avID)
-	if nil != err {
-		logging.LogErrorf("parse attribute view [%s] failed: %s", avID, err)
-		return
-	}
-
-	buf := bytes.Buffer{}
-	buf.WriteString(attrView.Name)
-	buf.WriteByte(' ')
-	for _, v := range attrView.Views {
-		buf.WriteString(v.Name)
-		buf.WriteByte(' ')
-	}
-	name = strings.TrimSpace(buf.String())
-	return
-}
-
-func getAttributeViewContent(avID string) (content string) {
-	if "" == avID {
-		return
-	}
-
-	attrView, err := av.ParseAttributeView(avID)
-	if nil != err {
-		logging.LogErrorf("parse attribute view [%s] failed: %s", avID, err)
-		return
-	}
-
-	buf := bytes.Buffer{}
-	buf.WriteString(attrView.Name)
-	buf.WriteByte(' ')
-	for _, v := range attrView.Views {
-		buf.WriteString(v.Name)
-		buf.WriteByte(' ')
-	}
-
-	if 1 > len(attrView.Views) {
-		content = strings.TrimSpace(buf.String())
-		return
-	}
-
-	var view *av.View
-	for _, v := range attrView.Views {
-		if av.LayoutTypeTable == v.LayoutType {
-			view = v
-			break
-		}
-	}
-	if nil == view {
-		content = strings.TrimSpace(buf.String())
-		return
-	}
-
-	table, err := renderAttributeViewTable(attrView, view)
-	if nil != err {
-		content = strings.TrimSpace(buf.String())
-		return
-	}
-
-	for _, col := range table.Columns {
-		buf.WriteString(col.Name)
-		buf.WriteByte(' ')
-	}
-
-	for _, row := range table.Rows {
-		for _, cell := range row.Cells {
-			if nil == cell.Value {
-				continue
-			}
-			buf.WriteString(cell.Value.String())
-			buf.WriteByte(' ')
-		}
-	}
-
-	content = strings.TrimSpace(buf.String())
-	return
-}
-
-func renderAttributeViewTable(attrView *av.AttributeView, view *av.View) (ret *av.Table, err error) {
-	ret = &av.Table{
-		ID:      view.ID,
-		Icon:    view.Icon,
-		Name:    view.Name,
-		Columns: []*av.TableColumn{},
-		Rows:    []*av.TableRow{},
-	}
-
-	// 组装列
-	for _, col := range view.Table.Columns {
-		key, _ := attrView.GetKey(col.ID)
-		if nil == key {
-			continue
-		}
-
-		ret.Columns = append(ret.Columns, &av.TableColumn{
-			ID:           key.ID,
-			Name:         key.Name,
-			Type:         key.Type,
-			Icon:         key.Icon,
-			Options:      key.Options,
-			NumberFormat: key.NumberFormat,
-			Template:     key.Template,
-			Relation:     key.Relation,
-			Rollup:       key.Rollup,
-			Wrap:         col.Wrap,
-			Hidden:       col.Hidden,
-			Width:        col.Width,
-			Pin:          col.Pin,
-			Calc:         col.Calc,
-		})
-	}
-
-	// 生成行
-	rows := map[string][]*av.KeyValues{}
-	for _, keyValues := range attrView.KeyValues {
-		for _, val := range keyValues.Values {
-			values := rows[val.BlockID]
-			if nil == values {
-				values = []*av.KeyValues{{Key: keyValues.Key, Values: []*av.Value{val}}}
-			} else {
-				values = append(values, &av.KeyValues{Key: keyValues.Key, Values: []*av.Value{val}})
-			}
-			rows[val.BlockID] = values
-		}
-	}
-
-	// 过滤掉不存在的行
-	var notFound []string
-	for blockID, keyValues := range rows {
-		blockValue := getRowBlockValue(keyValues)
-		if nil == blockValue {
-			notFound = append(notFound, blockID)
-			continue
-		}
-
-		if blockValue.IsDetached {
-			continue
-		}
-
-		if nil != blockValue.Block && "" == blockValue.Block.ID {
-			notFound = append(notFound, blockID)
-			continue
-		}
-
-		if GetBlockTree(blockID) == nil {
-			notFound = append(notFound, blockID)
-		}
-	}
-	for _, blockID := range notFound {
-		delete(rows, blockID)
-	}
-
-	// 生成行单元格
-	for rowID, row := range rows {
-		var tableRow av.TableRow
-		for _, col := range ret.Columns {
-			var tableCell *av.TableCell
-			for _, keyValues := range row {
-				if keyValues.Key.ID == col.ID {
-					tableCell = &av.TableCell{
-						ID:        keyValues.Values[0].ID,
-						Value:     keyValues.Values[0],
-						ValueType: col.Type,
-					}
-					break
-				}
-			}
-			if nil == tableCell {
-				tableCell = &av.TableCell{
-					ID:        ast.NewNodeID(),
-					ValueType: col.Type,
-				}
-			}
-			tableRow.ID = rowID
-
-			switch tableCell.ValueType {
-			case av.KeyTypeNumber: // 格式化数字
-				if nil != tableCell.Value && nil != tableCell.Value.Number && tableCell.Value.Number.IsNotEmpty {
-					tableCell.Value.Number.Format = col.NumberFormat
-					tableCell.Value.Number.FormatNumber()
-				}
-			case av.KeyTypeTemplate: // 渲染模板列
-				tableCell.Value = &av.Value{ID: tableCell.ID, KeyID: col.ID, BlockID: rowID, Type: av.KeyTypeTemplate, Template: &av.ValueTemplate{Content: col.Template}}
-			case av.KeyTypeCreated: // 填充创建时间列值，后面再渲染
-				tableCell.Value = &av.Value{ID: tableCell.ID, KeyID: col.ID, BlockID: rowID, Type: av.KeyTypeCreated}
-			case av.KeyTypeUpdated: // 填充更新时间列值，后面再渲染
-				tableCell.Value = &av.Value{ID: tableCell.ID, KeyID: col.ID, BlockID: rowID, Type: av.KeyTypeUpdated}
-			case av.KeyTypeRelation: // 清空关联列值，后面再渲染 https://ld246.com/article/1703831044435
-				if nil != tableCell.Value && nil != tableCell.Value.Relation {
-					tableCell.Value.Relation.Contents = nil
-				}
-			}
-
-			FillAttributeViewTableCellNilValue(tableCell, rowID, col.ID)
-
-			tableRow.Cells = append(tableRow.Cells, tableCell)
-		}
-		ret.Rows = append(ret.Rows, &tableRow)
-	}
-
-	// 渲染自动生成的列值，比如模板列、关联列、汇总列、创建时间列和更新时间列
-	for _, row := range ret.Rows {
-		for _, cell := range row.Cells {
-			switch cell.ValueType {
-			case av.KeyTypeTemplate: // 渲染模板列
-				keyValues := rows[row.ID]
-				ial := map[string]string{}
-				block := row.GetBlockValue()
-				if nil != block && !block.IsDetached {
-					ial = cache.GetBlockIAL(row.ID)
-					if nil == ial {
-						ial = map[string]string{}
-					}
-				}
-				content := renderTemplateCol(ial, cell.Value.Template.Content, keyValues)
-				cell.Value.Template.Content = content
-			case av.KeyTypeRollup: // 渲染汇总列
-				rollupKey, _ := attrView.GetKey(cell.Value.KeyID)
-				if nil == rollupKey || nil == rollupKey.Rollup {
-					break
-				}
-
-				relKey, _ := attrView.GetKey(rollupKey.Rollup.RelationKeyID)
-				if nil == relKey || nil == relKey.Relation {
-					break
-				}
-
-				relVal := attrView.GetValue(relKey.ID, row.ID)
-				if nil == relVal || nil == relVal.Relation {
-					break
-				}
-
-				destAv, _ := av.ParseAttributeView(relKey.Relation.AvID)
-				if nil == destAv {
-					break
-				}
-
-				destKey, _ := destAv.GetKey(rollupKey.Rollup.KeyID)
-				if nil == destKey {
-					continue
-				}
-
-				for _, blockID := range relVal.Relation.BlockIDs {
-					destVal := destAv.GetValue(rollupKey.Rollup.KeyID, blockID)
-					if nil == destVal {
-						destVal = GetAttributeViewDefaultValue(ast.NewNodeID(), rollupKey.Rollup.KeyID, blockID, destKey.Type)
-					}
-					if av.KeyTypeNumber == destKey.Type {
-						destVal.Number.Format = destKey.NumberFormat
-						destVal.Number.FormatNumber()
-					}
-
-					cell.Value.Rollup.Contents = append(cell.Value.Rollup.Contents, destVal.Clone())
-				}
-
-				cell.Value.Rollup.RenderContents(rollupKey.Rollup.Calc, destKey)
-			case av.KeyTypeRelation: // 渲染关联列
-				relKey, _ := attrView.GetKey(cell.Value.KeyID)
-				if nil != relKey && nil != relKey.Relation {
-					destAv, _ := av.ParseAttributeView(relKey.Relation.AvID)
-					if nil != destAv {
-						blocks := map[string]string{}
-						for _, blockValue := range destAv.GetBlockKeyValues().Values {
-							blocks[blockValue.BlockID] = blockValue.Block.Content
-						}
-						for _, blockID := range cell.Value.Relation.BlockIDs {
-							cell.Value.Relation.Contents = append(cell.Value.Relation.Contents, blocks[blockID])
-						}
-					}
-				}
-			case av.KeyTypeCreated: // 渲染创建时间
-				createdStr := row.ID[:len("20060102150405")]
-				created, parseErr := time.ParseInLocation("20060102150405", createdStr, time.Local)
-				if nil == parseErr {
-					cell.Value.Created = av.NewFormattedValueCreated(created.UnixMilli(), 0, av.CreatedFormatNone)
-					cell.Value.Created.IsNotEmpty = true
-				} else {
-					cell.Value.Created = av.NewFormattedValueCreated(time.Now().UnixMilli(), 0, av.CreatedFormatNone)
-				}
-			case av.KeyTypeUpdated: // 渲染更新时间
-				ial := map[string]string{}
-				block := row.GetBlockValue()
-				if nil != block && !block.IsDetached {
-					ial = cache.GetBlockIAL(row.ID)
-					if nil == ial {
-						ial = map[string]string{}
-					}
-				}
-				updatedStr := ial["updated"]
-				if "" == updatedStr && nil != block {
-					cell.Value.Updated = av.NewFormattedValueUpdated(block.Block.Updated, 0, av.UpdatedFormatNone)
-					cell.Value.Updated.IsNotEmpty = true
-				} else {
-					updated, parseErr := time.ParseInLocation("20060102150405", updatedStr, time.Local)
-					if nil == parseErr {
-						cell.Value.Updated = av.NewFormattedValueUpdated(updated.UnixMilli(), 0, av.UpdatedFormatNone)
-						cell.Value.Updated.IsNotEmpty = true
-					} else {
-						cell.Value.Updated = av.NewFormattedValueUpdated(time.Now().UnixMilli(), 0, av.UpdatedFormatNone)
-					}
-				}
-			}
-		}
-	}
-	return
-}
-
-func FillAttributeViewTableCellNilValue(tableCell *av.TableCell, rowID, colID string) {
-	if nil == tableCell.Value {
-		tableCell.Value = GetAttributeViewDefaultValue(tableCell.ID, colID, rowID, tableCell.ValueType)
-		return
-	}
-
-	tableCell.Value.Type = tableCell.ValueType
-	switch tableCell.ValueType {
-	case av.KeyTypeText:
-		if nil == tableCell.Value.Text {
-			tableCell.Value.Text = &av.ValueText{}
-		}
-	case av.KeyTypeNumber:
-		if nil == tableCell.Value.Number {
-			tableCell.Value.Number = &av.ValueNumber{}
-		}
-	case av.KeyTypeDate:
-		if nil == tableCell.Value.Date {
-			tableCell.Value.Date = &av.ValueDate{}
-		}
-	case av.KeyTypeSelect:
-		if 1 > len(tableCell.Value.MSelect) {
-			tableCell.Value.MSelect = []*av.ValueSelect{}
-		}
-	case av.KeyTypeMSelect:
-		if 1 > len(tableCell.Value.MSelect) {
-			tableCell.Value.MSelect = []*av.ValueSelect{}
-		}
-	case av.KeyTypeURL:
-		if nil == tableCell.Value.URL {
-			tableCell.Value.URL = &av.ValueURL{}
-		}
-	case av.KeyTypeEmail:
-		if nil == tableCell.Value.Email {
-			tableCell.Value.Email = &av.ValueEmail{}
-		}
-	case av.KeyTypePhone:
-		if nil == tableCell.Value.Phone {
-			tableCell.Value.Phone = &av.ValuePhone{}
-		}
-	case av.KeyTypeMAsset:
-		if 1 > len(tableCell.Value.MAsset) {
-			tableCell.Value.MAsset = []*av.ValueAsset{}
-		}
-	case av.KeyTypeTemplate:
-		if nil == tableCell.Value.Template {
-			tableCell.Value.Template = &av.ValueTemplate{}
-		}
-	case av.KeyTypeCreated:
-		if nil == tableCell.Value.Created {
-			tableCell.Value.Created = &av.ValueCreated{}
-		}
-	case av.KeyTypeUpdated:
-		if nil == tableCell.Value.Updated {
-			tableCell.Value.Updated = &av.ValueUpdated{}
-		}
-	case av.KeyTypeCheckbox:
-		if nil == tableCell.Value.Checkbox {
-			tableCell.Value.Checkbox = &av.ValueCheckbox{}
-		}
-	case av.KeyTypeRelation:
-		if nil == tableCell.Value.Relation {
-			tableCell.Value.Relation = &av.ValueRelation{}
-		}
-	case av.KeyTypeRollup:
-		if nil == tableCell.Value.Rollup {
-			tableCell.Value.Rollup = &av.ValueRollup{}
-		}
+func RefreshUpdated(node *ast.Node) {
+	updated := util.CurrentTimeSecondsStr()
+	node.SetIALAttr("updated", updated)
+	parents := ParentNodesWithHeadings(node)
+	for _, parent := range parents { // 更新所有父节点的更新时间字段
+		parent.SetIALAttr("updated", updated)
 	}
 }
 
-func GetAttributeViewDefaultValue(valueID, keyID, blockID string, typ av.KeyType) (ret *av.Value) {
-	ret = &av.Value{ID: valueID, KeyID: keyID, BlockID: blockID, Type: typ}
-	switch typ {
-	case av.KeyTypeText:
-		ret.Text = &av.ValueText{}
-	case av.KeyTypeNumber:
-		ret.Number = &av.ValueNumber{}
-	case av.KeyTypeDate:
-		ret.Date = &av.ValueDate{}
-	case av.KeyTypeSelect:
-		ret.MSelect = []*av.ValueSelect{}
-	case av.KeyTypeMSelect:
-		ret.MSelect = []*av.ValueSelect{}
-	case av.KeyTypeURL:
-		ret.URL = &av.ValueURL{}
-	case av.KeyTypeEmail:
-		ret.Email = &av.ValueEmail{}
-	case av.KeyTypePhone:
-		ret.Phone = &av.ValuePhone{}
-	case av.KeyTypeMAsset:
-		ret.MAsset = []*av.ValueAsset{}
-	case av.KeyTypeTemplate:
-		ret.Template = &av.ValueTemplate{}
-	case av.KeyTypeCreated:
-		ret.Created = &av.ValueCreated{}
-	case av.KeyTypeUpdated:
-		ret.Updated = &av.ValueUpdated{}
-	case av.KeyTypeCheckbox:
-		ret.Checkbox = &av.ValueCheckbox{}
-	case av.KeyTypeRelation:
-		ret.Relation = &av.ValueRelation{}
-	case av.KeyTypeRollup:
-		ret.Rollup = &av.ValueRollup{}
-	}
-	return
-}
-
-func renderTemplateCol(ial map[string]string, tplContent string, rowValues []*av.KeyValues) string {
-	if "" == ial["id"] {
-		block := getRowBlockValue(rowValues)
-		ial["id"] = block.Block.ID
-	}
-	if "" == ial["updated"] {
-		block := getRowBlockValue(rowValues)
-		ial["updated"] = time.UnixMilli(block.Block.Updated).Format("20060102150405")
-	}
-
-	goTpl := template.New("").Delims(".action{", "}")
-	tplFuncMap := util.BuiltInTemplateFuncs()
-	// 这里存在依赖问题所以不支持 SQLTemplateFuncs(&tplFuncMap)
-	goTpl = goTpl.Funcs(tplFuncMap)
-	tpl, tplErr := goTpl.Funcs(tplFuncMap).Parse(tplContent)
-	if nil != tplErr {
-		logging.LogWarnf("parse template [%s] failed: %s", tplContent, tplErr)
-		return ""
-	}
-
-	buf := &bytes.Buffer{}
-	dataModel := map[string]interface{}{} // 复制一份 IAL 以避免修改原始数据
-	for k, v := range ial {
-		dataModel[k] = v
-
-		// Database template column supports `created` and `updated` built-in variables https://github.com/siyuan-note/siyuan/issues/9364
-		createdStr := ial["id"]
-		if "" != createdStr {
-			createdStr = createdStr[:len("20060102150405")]
+func CreatedUpdated(node *ast.Node) {
+	// 补全子节点的更新时间 Improve block update time filling https://github.com/siyuan-note/siyuan/issues/12182
+	ast.Walk(node, func(n *ast.Node, entering bool) ast.WalkStatus {
+		if !entering || !n.IsBlock() || ast.NodeKramdownBlockIAL == n.Type {
+			return ast.WalkContinue
 		}
-		created, parseErr := time.ParseInLocation("20060102150405", createdStr, time.Local)
-		if nil == parseErr {
-			dataModel["created"] = created
-		} else {
-			logging.LogWarnf("parse created [%s] failed: %s", createdStr, parseErr)
-			dataModel["created"] = time.Now()
-		}
-		updatedStr := ial["updated"]
-		updated, parseErr := time.ParseInLocation("20060102150405", updatedStr, time.Local)
-		if nil == parseErr {
-			dataModel["updated"] = updated
-		} else {
-			dataModel["updated"] = time.Now()
-		}
-	}
-	for _, rowValue := range rowValues {
-		if 0 < len(rowValue.Values) {
-			v := rowValue.Values[0]
-			if av.KeyTypeNumber == v.Type {
-				dataModel[rowValue.Key.Name] = v.Number.Content
-			} else if av.KeyTypeDate == v.Type {
-				dataModel[rowValue.Key.Name] = time.UnixMilli(v.Date.Content)
-			} else {
-				dataModel[rowValue.Key.Name] = v.String()
-			}
-		}
-	}
-	if err := tpl.Execute(buf, dataModel); nil != err {
-		logging.LogWarnf("execute template [%s] failed: %s", tplContent, err)
-	}
-	return buf.String()
-}
 
-func getRowBlockValue(keyValues []*av.KeyValues) (ret *av.Value) {
-	for _, kv := range keyValues {
-		if av.KeyTypeBlock == kv.Key.Type && 0 < len(kv.Values) {
-			ret = kv.Values[0]
-			break
+		updated := n.IALAttr("updated")
+		if "" == updated && ast.IsNodeIDPattern(n.ID) {
+			created := util.TimeFromID(n.ID)
+			n.SetIALAttr("updated", created)
 		}
+		return ast.WalkContinue
+	})
+
+	created := util.TimeFromID(node.ID)
+	updated := node.IALAttr("updated")
+	if !util.IsTimeStr(updated) {
+		updated = created
+		node.SetIALAttr("updated", updated)
 	}
-	return
+	if updated < created {
+		updated = created
+	}
+	parents := ParentNodesWithHeadings(node)
+	for _, parent := range parents { // 更新所有父节点的更新时间字段
+		parent.SetIALAttr("updated", updated)
+		cache.PutBlockIAL(parent.ID, parse.IAL2Map(parent.KramdownIAL))
+	}
 }
