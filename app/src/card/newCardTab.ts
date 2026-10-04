@@ -1,10 +1,11 @@
 import {Tab} from "../layout/Tab";
 import {Custom} from "../layout/dock/Custom";
 import {bindCardEvent, genCardHTML} from "./openCard";
-import {fetchPost} from "../util/fetch";
+import {fetchDueCards} from "./fetchDueCards";
 import {Protyle} from "../protyle";
 import {setPanelFocus} from "../layout/util";
-import {App} from "../index";
+import type {App} from "../index";
+import {clearOBG} from "../layout/dock/util";
 
 export const newCardModel = (options: {
     app: App,
@@ -25,10 +26,14 @@ export const newCardModel = (options: {
         data: options.data,
         async init() {
             if (options.data.cardsData) {
+                let cardsData = options.data.cardsData;
+                for (let i = 0; i < options.app.plugins.length; i++) {
+                    cardsData = await options.app.plugins[i].updateCards(options.data.cardsData);
+                }
                 this.element.innerHTML = genCardHTML({
                     id: this.data.id,
                     cardType: this.data.cardType,
-                    cardsData: options.data.cardsData,
+                    cardsData,
                     isTab: true,
                 });
 
@@ -38,24 +43,24 @@ export const newCardModel = (options: {
                     id: this.data.id,
                     title: this.data.title,
                     cardType: this.data.cardType,
-                    cardsData: options.data.cardsData,
+                    cardsData,
                     index: options.data.index,
                 });
-                this.data.editor = editor;
+                customObj.editors.push(editor);
+                editor.resize();
                 // https://github.com/siyuan-note/siyuan/issues/9561#issuecomment-1794473512
                 delete options.data.cardsData;
                 delete options.data.index;
             } else {
-                fetchPost(this.data.cardType === "all" ? "/api/riff/getRiffDueCards" :
-                    (this.data.cardType === "doc" ? "/api/riff/getTreeRiffDueCards" : "/api/riff/getNotebookRiffDueCards"), {
-                    rootID: this.data.id,
-                    deckID: this.data.id,
-                    notebook: this.data.id,
-                }, async (response) => {
+                fetchDueCards(this.data.cardType, this.data.id, undefined, async (response) => {
+                    let cardsData = response.data;
+                    for (let i = 0; i < options.app.plugins.length; i++) {
+                        cardsData = await options.app.plugins[i].updateCards(cardsData);
+                    }
                     this.element.innerHTML = genCardHTML({
                         id: this.data.id,
                         cardType: this.data.cardType,
-                        cardsData: response.data,
+                        cardsData,
                         isTab: true,
                     });
 
@@ -65,9 +70,10 @@ export const newCardModel = (options: {
                         id: this.data.id,
                         title: this.data.title,
                         cardType: this.data.cardType,
-                        cardsData: response.data,
+                        cardsData,
                     });
-                    customObj.data.editor = editor;
+                    editor.resize();
+                    customObj.editors.push(editor);
                 });
             }
         },
@@ -82,22 +88,35 @@ export const newCardModel = (options: {
             }
         },
         update() {
-            fetchPost(this.data.cardType === "all" ? "/api/riff/getRiffDueCards" :
-                (this.data.cardType === "doc" ? "/api/riff/getTreeRiffDueCards" : "/api/riff/getNotebookRiffDueCards"), {
-                rootID: this.data.id,
-                deckID: this.data.id,
-                notebook: this.data.id,
-            }, (response) => {
+            fetchDueCards(this.data.cardType, this.data.id, undefined, async (response) => {
+                let cardsData = response.data;
+                for (let i = 0; i < options.app.plugins.length; i++) {
+                    cardsData = await options.app.plugins[i].updateCards(cardsData);
+                }
+                customObj.editors.forEach(item => {
+                    item.destroy();
+                });
                 this.element.innerHTML = genCardHTML({
                     id: this.data.id,
                     cardType: this.data.cardType,
-                    cardsData: response.data,
+                    cardsData,
                     isTab: true,
                 });
+                editor = await bindCardEvent({
+                    app: options.app,
+                    element: this.element,
+                    id: this.data.id,
+                    title: this.data.title,
+                    cardType: this.data.cardType,
+                    cardsData,
+                });
+                customObj.editors.push(editor);
+                editor.resize();
             });
         }
     });
     customObj.element.addEventListener("click", () => {
+        clearOBG();
         setPanelFocus(customObj.element.parentElement.parentElement);
     });
     return customObj;

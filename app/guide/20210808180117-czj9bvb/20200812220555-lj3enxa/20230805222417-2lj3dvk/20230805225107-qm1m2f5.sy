@@ -1,12 +1,13 @@
 {
 	"ID": "20230805225107-qm1m2f5",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"icon": "1f387",
 		"id": "20230805225107-qm1m2f5",
 		"title": "功能特性",
-		"updated": "20230805230402"
+		"type": "doc",
+		"updated": "20260809232000"
 	},
 	"Children": [
 		{
@@ -29,7 +30,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230805225851-hxq8pfu",
-				"updated": "20230805230246"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -58,37 +59,6 @@
 									"TextMarkBlockRefID": "20230805230131-sn7obzb",
 									"TextMarkBlockRefSubtype": "s",
 									"TextMarkTextContent": "对接第三方云端存储"
-								}
-							]
-						}
-					]
-				},
-				{
-					"ID": "20230805225905-gbfjrph",
-					"Type": "NodeListItem",
-					"ListData": {
-						"BulletChar": 42,
-						"Marker": "Kg=="
-					},
-					"Properties": {
-						"id": "20230805225905-gbfjrph",
-						"updated": "20230805230246"
-					},
-					"Children": [
-						{
-							"ID": "20230805225905-bf2ssno",
-							"Type": "NodeParagraph",
-							"Properties": {
-								"id": "20230805225905-bf2ssno",
-								"updated": "20230805230246"
-							},
-							"Children": [
-								{
-									"Type": "NodeTextMark",
-									"TextMarkType": "block-ref",
-									"TextMarkBlockRefID": "20230805230218-aea8icj",
-									"TextMarkBlockRefSubtype": "s",
-									"TextMarkTextContent": "搜索资源文件内容"
 								}
 							]
 						}

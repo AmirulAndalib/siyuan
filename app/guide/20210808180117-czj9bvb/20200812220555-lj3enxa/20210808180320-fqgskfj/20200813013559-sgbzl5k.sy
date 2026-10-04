@@ -1,12 +1,12 @@
 {
 	"ID": "20200813013559-sgbzl5k",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20200813013559-sgbzl5k",
 		"title": "引用内容块",
 		"type": "doc",
-		"updated": "20230820103525"
+		"updated": "20260927183214"
 	},
 	"Children": [
 		{
@@ -15,7 +15,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20200817123136-in6y5m1",
-				"updated": "20210512154105"
+				"updated": "20260927183214"
 			},
 			"Children": [
 				{
@@ -53,6 +53,47 @@
 					"Type": "NodeTextMark",
 					"TextMarkType": "tag",
 					"TextMarkTextContent": "内容块/引用"
+				}
+			]
+		},
+		{
+			"ID": "20260927091603-ca0ts26",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20260927091603-ca0ts26",
+				"updated": "20260927183214"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": "输入 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "(("
+				},
+				{
+					"Type": "NodeText",
+					"Data": " 或 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "code",
+					"TextMarkTextContent": "[["
+				},
+				{
+					"Type": "NodeText",
+					"Data": " 和文档标题后，可在引用候选列表中选择 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "选择位置新建文档"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "，指定笔记本根目录或父文档。确认后将在该位置创建文档，并在原位置插入引用。所选位置仅对本次创建生效，不会修改默认保存路径；取消不会创建文档。桌面端和移动端均支持此操作。数据库条目绑定或重新绑定文档时也可使用此操作。文档创建成功后才会绑定到该条目；取消或创建失败不会改变原有绑定。"
 				}
 			]
 		},
@@ -277,7 +318,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20220623194755-30vtsr7",
-				"updated": "20220623194758"
+				"updated": "20260820190627"
 			},
 			"Children": [
 				{
@@ -423,7 +464,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20220623195559-r0greck",
-				"updated": "20230420185816"
+				"updated": "20260820190627"
 			},
 			"Children": [
 				{
@@ -478,7 +519,8 @@
 						"Marker": "Kg=="
 					},
 					"Properties": {
-						"id": "20220623195701-obv1sdb"
+						"id": "20220623195701-obv1sdb",
+						"updated": "20260820190627"
 					},
 					"Children": [
 						{
@@ -486,12 +528,12 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220623195701-akeq453",
-								"updated": "20220623195737"
+								"updated": "20260820190627"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "右键单击"
+									"Data": "右键点击"
 								},
 								{
 									"Type": "NodeText",
@@ -514,7 +556,7 @@
 					},
 					"Properties": {
 						"id": "20220623195738-5zwao6z",
-						"updated": "20220623195906"
+						"updated": "20260820190627"
 					},
 					"Children": [
 						{
@@ -522,12 +564,12 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20220623195738-7bxe56c",
-								"updated": "20220623195906"
+								"updated": "20260820190627"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "右键单击"
+									"Data": "右键点击"
 								},
 								{
 									"Type": "NodeText",
@@ -572,7 +614,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230420185742-g0vtyx7",
-				"updated": "20230420190027"
+				"updated": "20250311200002"
 			},
 			"Children": [
 				{
@@ -584,7 +626,7 @@
 					},
 					"Properties": {
 						"id": "20230420185742-14djxj3",
-						"updated": "20230420190025"
+						"updated": "20250311200000"
 					},
 					"Children": [
 						{
@@ -592,7 +634,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230420185742-brqgayg",
-								"updated": "20230420190025"
+								"updated": "20250311200000"
 							},
 							"Children": [
 								{
@@ -602,7 +644,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Enter"
+									"TextMarkTextContent": "回车"
 								},
 								{
 									"Type": "NodeText",
@@ -611,7 +653,7 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Click"
+									"TextMarkTextContent": "点击"
 								},
 								{
 									"Type": "NodeText",
@@ -630,7 +672,7 @@
 					},
 					"Properties": {
 						"id": "20230420185748-ehr9h7w",
-						"updated": "20230420190027"
+						"updated": "20250311200002"
 					},
 					"Children": [
 						{
@@ -638,7 +680,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230420185748-sb1thir",
-								"updated": "20230420190027"
+								"updated": "20250311200002"
 							},
 							"Children": [
 								{
@@ -648,7 +690,16 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Ctrl+Enter"
+									"TextMarkTextContent": "Ctrl"
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​+"
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "回车"
 								},
 								{
 									"Type": "NodeText",
@@ -657,7 +708,16 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "kbd",
-									"TextMarkTextContent": "Ctrl+Click"
+									"TextMarkTextContent": "Ctrl"
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​+"
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "点击"
 								},
 								{
 									"Type": "NodeText",
@@ -675,7 +735,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230420122954-zw10k6f",
-				"updated": "20230420122957"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -689,7 +749,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230518100357-4wadf96",
-				"updated": "20230518100526"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -712,7 +772,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": "​ 中启用 "
+					"Data": " ​ 中启用 "
 				},
 				{
 					"Type": "NodeTextMark",

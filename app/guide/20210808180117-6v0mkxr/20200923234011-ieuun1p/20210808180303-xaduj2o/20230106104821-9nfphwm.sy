@@ -1,11 +1,12 @@
 {
 	"ID": "20230106104821-9nfphwm",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20230106104821-9nfphwm",
 		"title": "Workspace",
-		"updated": "20230117000549"
+		"type": "doc",
+		"updated": "20260918195936"
 	},
 	"Children": [
 		{
@@ -110,7 +111,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230109113955-ja8w7gp",
-				"updated": "20230109113959"
+				"updated": "20260829104731"
 			},
 			"Children": [
 				{
@@ -125,7 +126,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230109113955-471odxk",
-				"updated": "20230117000549"
+				"updated": "20260829104731"
 			},
 			"Children": [
 				{
@@ -137,7 +138,7 @@
 					},
 					"Properties": {
 						"id": "20230109113955-4p8sitz",
-						"updated": "20230117000549"
+						"updated": "20250306083853"
 					},
 					"Children": [
 						{
@@ -159,7 +160,7 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230109113955-f2iskk4",
-								"updated": "20230117000549"
+								"updated": "20250306083853"
 							},
 							"Children": [
 								{
@@ -169,16 +170,25 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "code",
-									"TextMarkTextContent": "--workspace=absolute-path-of-the-workspace"
+									"TextMarkTextContent": "--workspace=&quot;Absolute-path-of-the-workspace&quot;"
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​. For example, multiple shortcuts can be copied on a Windows system, and each Shortcut - Property - Target is followed by a workspace path parameter, such as "
+									"Data": "​(Please use "
 								},
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "code",
-									"TextMarkTextContent": "--workspace=F:\\SiYuan"
+									"TextMarkTextContent": "&quot;"
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​ to enclose the path). For example, multiple shortcuts can be copied on a Windows system, and each Shortcut - Property - Target is followed by a workspace path parameter, such as "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "code",
+									"TextMarkTextContent": "--workspace=&quot;F:\\SiYuan&quot;"
 								},
 								{
 									"Type": "NodeText",
@@ -206,7 +216,7 @@
 					},
 					"Properties": {
 						"id": "20230109113955-gi1ao5j",
-						"updated": "20230109114043"
+						"updated": "20260829104731"
 					},
 					"Children": [
 						{
@@ -214,12 +224,30 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230109113955-hpw3tsz",
-								"updated": "20230109114043"
+								"updated": "20260829104731"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "On the mobile, we can switch between different workspaces in "
+									"Data": "On mobile, you can switch between workspaces in "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "More"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " - "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "Settings"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " - "
 								},
 								{
 									"Type": "NodeTextMark",
@@ -228,7 +256,7 @@
 								},
 								{
 									"Type": "NodeText",
-									"Data": "​ in the right column"
+									"Data": "​."
 								}
 							]
 						}
@@ -242,7 +270,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230106105213-0cv5aqm",
-				"updated": "20230106105213"
+				"updated": "20260918195936"
 			},
 			"Children": [
 				{
@@ -543,6 +571,20 @@
 							]
 						}
 					]
+				}
+			]
+		},
+		{
+			"ID": "20260917190844-1yo0d58",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20260917190844-1yo0d58",
+				"updated": "20260918195936"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": "Third-party themes are stored in data/themes/ and icon packages in data/icons/; both participate in data sync and snapshots. Each device keeps its appearance selection in its local conf/conf.json. Built-in appearance resources are not synced. Upgrade migration moves the original directories into data and removes the source copies."
 				}
 			]
 		}

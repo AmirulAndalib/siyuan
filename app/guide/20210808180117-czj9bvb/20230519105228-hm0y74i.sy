@@ -1,12 +1,13 @@
 {
 	"ID": "20230519105228-hm0y74i",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"icon": "1f6e3",
 		"id": "20230519105228-hm0y74i",
 		"title": "最新进展",
-		"updated": "20230617085456"
+		"type": "doc",
+		"updated": "20260925121123"
 	},
 	"Children": [
 		{
@@ -15,9 +16,43 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20230519110202-1k238kq",
-				"updated": "20230617085456"
+				"updated": "20260925121123"
 			},
 			"Children": [
+				{
+					"ID": "20260925120925-1bfm1wk",
+					"Type": "NodeListItem",
+					"ListData": {
+						"BulletChar": 42,
+						"Marker": "Kg=="
+					},
+					"Properties": {
+						"id": "20260925120925-1bfm1wk",
+						"updated": "20260925121123"
+					},
+					"Children": [
+						{
+							"ID": "20260925120925-75shjjr",
+							"Type": "NodeParagraph",
+							"Properties": {
+								"id": "20260925120925-75shjjr",
+								"updated": "20260925121123"
+							},
+							"Children": [
+								{
+									"Type": "NodeText",
+									"Data": "小红书 "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "a",
+									"TextMarkAHref": "https://www.xiaohongshu.com/user/profile/55c48726c2bdeb631a62fa35",
+									"TextMarkTextContent": "思源笔记"
+								}
+							]
+						}
+					]
+				},
 				{
 					"ID": "20230519110330-3wo6me7",
 					"Type": "NodeListItem",
@@ -40,7 +75,7 @@
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "微信公众号 "
+									"Data": "微信公众号 ​"
 								},
 								{
 									"Type": "NodeTextMark",
@@ -101,6 +136,10 @@
 								{
 									"Type": "NodeKramdownSpanIAL",
 									"Data": "{: style=\"width: 130px;\" parent-style=\"max-width: 140px;\"}"
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​"
 								}
 							]
 						}
@@ -128,7 +167,7 @@
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "微博 "
+									"Data": "微博 ​"
 								},
 								{
 									"Type": "NodeTextMark",
@@ -187,6 +226,10 @@
 											"Type": "NodeCloseParen"
 										}
 									]
+								},
+								{
+									"Type": "NodeText",
+									"Data": "​"
 								}
 							]
 						}
@@ -200,7 +243,8 @@
 						"Marker": "Kg=="
 					},
 					"Properties": {
-						"id": "20230519111123-ra6yjat"
+						"id": "20230519111123-ra6yjat",
+						"updated": "20260614111937"
 					},
 					"Children": [
 						{
@@ -208,12 +252,12 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20230519111123-jwmarc1",
-								"updated": "20230519111143"
+								"updated": "20260614111937"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "Twitter "
+									"Data": "X ​"
 								},
 								{
 									"Type": "NodeTextMark",
@@ -227,8 +271,8 @@
 								{
 									"Type": "NodeTextMark",
 									"TextMarkType": "a",
-									"TextMarkAHref": "https://twitter.com/b3logos",
-									"TextMarkTextContent": "https://twitter.com/b3logos"
+									"TextMarkAHref": "https://x.com/b3logos",
+									"TextMarkTextContent": "https://x.com/b3logos"
 								}
 							]
 						}

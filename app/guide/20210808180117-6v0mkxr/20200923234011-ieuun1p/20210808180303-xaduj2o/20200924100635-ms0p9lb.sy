@@ -1,12 +1,12 @@
 {
 	"ID": "20200924100635-ms0p9lb",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20200924100635-ms0p9lb",
 		"title": "Bookmark and Tag",
 		"type": "doc",
-		"updated": "20231205225745"
+		"updated": "20260810212846"
 	},
 	"Children": [
 		{
@@ -14,7 +14,8 @@
 			"Type": "NodeHeading",
 			"HeadingLevel": 2,
 			"Properties": {
-				"id": "20210104091414-c8862yg"
+				"id": "20210104091414-c8862yg",
+				"updated": "20260810212846"
 			},
 			"Children": [
 				{
@@ -45,7 +46,8 @@
 			"ID": "20210104091414-b6lifws",
 			"Type": "NodeParagraph",
 			"Properties": {
-				"id": "20210104091414-b6lifws"
+				"id": "20210104091414-b6lifws",
+				"updated": "20260810212846"
 			},
 			"Children": [
 				{
@@ -55,7 +57,16 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Alt 3"
+					"TextMarkTextContent": "Alt"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "3"
 				},
 				{
 					"Type": "NodeText",
@@ -64,11 +75,20 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "⌘ 3"
+					"TextMarkTextContent": "⌃"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "). If you want to cancel the collection, select Delete in the drop-down menu of the content block ID."
+					"Data": "+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "3"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​). If you want to cancel the collection, select Delete in the drop-down menu of the content block ID."
 				}
 			]
 		},
@@ -77,7 +97,8 @@
 			"Type": "NodeHeading",
 			"HeadingLevel": 2,
 			"Properties": {
-				"id": "20210104091414-qp10fn0"
+				"id": "20210104091414-qp10fn0",
+				"updated": "20260810212846"
 			},
 			"Children": [
 				{
@@ -156,7 +177,8 @@
 			"ID": "20210104091414-s3vdbdu",
 			"Type": "NodeParagraph",
 			"Properties": {
-				"id": "20210104091414-s3vdbdu"
+				"id": "20210104091414-s3vdbdu",
+				"updated": "20260810212846"
 			},
 			"Children": [
 				{
@@ -166,7 +188,16 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "Alt 4"
+					"TextMarkTextContent": "Alt"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "4"
 				},
 				{
 					"Type": "NodeText",
@@ -175,11 +206,20 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
-					"TextMarkTextContent": "⌘ 4"
+					"TextMarkTextContent": "⌃"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "). If you need to cancel the tag, just delete the tag in the content block."
+					"Data": "+"
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "4"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​). If you need to cancel the tag, just delete the tag in the content block."
 				}
 			]
 		},
@@ -281,7 +321,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "\u0026lt;"
+					"TextMarkTextContent": "&lt;"
 				},
 				{
 					"Type": "NodeText",
@@ -290,7 +330,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "\u0026gt;"
+					"TextMarkTextContent": "&gt;"
 				},
 				{
 					"Type": "NodeText",
@@ -299,7 +339,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "\u0026amp;"
+					"TextMarkTextContent": "&amp;"
 				},
 				{
 					"Type": "NodeText",

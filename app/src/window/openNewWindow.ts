@@ -4,8 +4,13 @@ import {ipcRenderer} from "electron";
 /// #endif
 import {Constants} from "../constants";
 import {Tab} from "../layout/Tab";
-import {fetchPost} from "../util/fetch";
+import {fetchSyncPost} from "../util/fetch";
 import {showMessage} from "../dialog/message";
+import {getAssetExtension, getDisplayName} from "../util/pathName";
+import {getSearch} from "../util/functions";
+import {isBrowserRenderableImagePath} from "../util/imageURL";
+import {appendRemoteQuery} from "../util/hostCapabilities";
+import type {IWindowGeometry} from "./geometry";
 
 interface windowOptions {
     position?: {
@@ -13,8 +18,24 @@ interface windowOptions {
         y: number,
     },
     width?: number,
-    height?: number
+    height?: number,
+    alwaysOnTop?: boolean,
 }
+
+const getWindowURL = (layout: unknown) => {
+    const url = new URL("/stage/build/app/window.html", window.location.origin);
+    url.searchParams.set("v", Constants.SIYUAN_VERSION);
+    url.searchParams.set("json", JSON.stringify(layout));
+    return appendRemoteQuery(url).href;
+};
+
+export const openNewWindowByWorkspace = (id: string, windowGeometry?: IWindowGeometry) => {
+    /// #if !BROWSER
+    const url = new URL(getWindowURL([]));
+    url.searchParams.set("windowWorkspace", id);
+    ipcRenderer.send(Constants.SIYUAN_OPEN_WINDOW, {url: url.href, alwaysOnTop: false, windowGeometry});
+    /// #endif
+};
 
 export const openNewWindow = (tab: Tab, options: windowOptions = {}) => {
     const json = {};
@@ -24,20 +45,29 @@ export const openNewWindow = (tab: Tab, options: windowOptions = {}) => {
         position: options.position,
         width: options.width,
         height: options.height,
-        // 需要 encode， 否则 https://github.com/siyuan-note/siyuan/issues/9343
-        url: `${window.location.protocol}//${window.location.host}/stage/build/app/window.html?v=${Constants.SIYUAN_VERSION}&json=${encodeURIComponent(JSON.stringify(json))}`
+        alwaysOnTop: !!options.alwaysOnTop,
+        url: getWindowURL([json]),
     });
     /// #endif
     tab.parent.removeTab(tab.id);
 };
 
-export const openNewWindowById = (id: string, options: windowOptions = {}) => {
-    fetchPost("/api/block/getBlockInfo", {id}, (response) => {
+export const openNewWindowById = async (id: string | string[], options: windowOptions = {}) => {
+    let ids = id;
+    if (typeof ids === "string") {
+        ids = [ids];
+    }
+    const json = [];
+    for (let i = 0; i < ids.length; i++) {
+        const response = await fetchSyncPost("/api/block/getBlockInfo", {id: ids[i]});
         if (response.code === 3) {
             showMessage(response.msg);
             return;
         }
-        const json: any = {
+        if (response.code !== 0) {
+            return;
+        }
+        json.push({
             title: response.data.rootTitle,
             docIcon: response.data.rootIcon,
             pin: false,
@@ -46,21 +76,62 @@ export const openNewWindowById = (id: string, options: windowOptions = {}) => {
             action: "Tab",
             children: {
                 notebookId: response.data.box,
-                blockId: id,
+                blockId: ids[i],
                 rootId: response.data.rootID,
                 mode: "wysiwyg",
                 instance: "Editor",
-                action: response.data.rootID === id ? Constants.CB_GET_SCROLL : Constants.CB_GET_ALL
+                action: response.data.rootID === ids[i] ? Constants.CB_GET_SCROLL : Constants.CB_GET_ALL
             }
-        };
-        /// #if !BROWSER
+        });
+    }
+    /// #if !BROWSER
+    ipcRenderer.send(Constants.SIYUAN_OPEN_WINDOW, {
+        position: options.position,
+        width: options.width,
+        height: options.height,
+        alwaysOnTop: !!options.alwaysOnTop,
+        url: getWindowURL(json),
+    });
+    /// #endif
+};
+
+export const openAssetNewWindow = (
+    assetPath: string,
+    options: windowOptions = {},
+    page?: number | string,
+) => {
+    /// #if !BROWSER
+    const suffix = getAssetExtension(assetPath).toLowerCase();
+    if (Constants.SIYUAN_ASSETS_EXTS.includes(suffix) &&
+        isBrowserRenderableImagePath(assetPath)) {
+        let docIcon = "iconPDF";
+        if (Constants.SIYUAN_ASSETS_IMAGE.includes(suffix)) {
+            docIcon = "iconImage";
+        } else if (Constants.SIYUAN_ASSETS_AUDIO.includes(suffix)) {
+            docIcon = "iconRecord";
+        } else if (Constants.SIYUAN_ASSETS_VIDEO.includes(suffix)) {
+            docIcon = "iconVideo";
+        }
+        const json: any = [{
+            title: getDisplayName(assetPath),
+            docIcon,
+            pin: false,
+            active: true,
+            instance: "Tab",
+            action: "Tab",
+            children: {
+                path: assetPath,
+                page: page ?? parseInt(getSearch("page", assetPath)),
+                instance: "Asset",
+            }
+        }];
         ipcRenderer.send(Constants.SIYUAN_OPEN_WINDOW, {
             position: options.position,
             width: options.width,
             height: options.height,
-            url: `${window.location.protocol}//${window.location.host}/stage/build/app/window.html?v=${Constants.SIYUAN_VERSION}&json=${encodeURIComponent(JSON.stringify(json))}`
+            alwaysOnTop: !!options.alwaysOnTop,
+            url: getWindowURL(json),
         });
-        /// #endif
-    });
-
+    }
+    /// #endif
 };

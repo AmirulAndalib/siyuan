@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -19,13 +19,13 @@
 package util
 
 import (
-	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v4/host"
 	"github.com/siyuan-note/logging"
 )
 
 func GetOSPlatform() (plat string) {
 	plat, _, _, err := host.PlatformInformation()
-	if nil != err {
+	if err != nil {
 		logging.LogWarnf("get os platform failed: %s", err)
 		return "Unknown"
 	}

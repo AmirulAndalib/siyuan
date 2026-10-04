@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -18,6 +18,7 @@ package model
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -40,37 +41,110 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-// FixIndexJob 自动校验数据库索引 https://github.com/siyuan-note/siyuan/issues/7016
-func FixIndexJob() {
-	task.AppendTask(task.DatabaseIndexFix, removeDuplicateDatabaseIndex)
-	sql.WaitForWritingDatabase()
+var (
+	checkIndexOnce = sync.Once{}
 
-	task.AppendTask(task.DatabaseIndexFix, resetDuplicateBlocksOnFileSys)
+	// fixIndexMu 保证 checkIndex 与 AutoFixIndex 互斥，不会并发跑同一套订正。
+	fixIndexMu sync.Mutex
+	// lastFixedAt 记录上次订正完成时间，用于 AutoFixIndex 的冷却期判断。
+	lastFixedAt time.Time
+)
 
-	task.AppendTask(task.DatabaseIndexFix, fixBlockTreeByFileSys)
-	sql.WaitForWritingDatabase()
+const (
+	// idleFixThreshold 为用户空闲超过该阈值后才允许触发空闲订正。
+	idleFixThreshold = 7 * time.Minute
+	// fixCooldown 为上次订正后至少间隔该时长才允许下一次空闲订正。
+	fixCooldown = 120 * time.Minute
+)
 
-	task.AppendTask(task.DatabaseIndexFix, fixDatabaseIndexByBlockTree)
-	sql.WaitForWritingDatabase()
+// checkIndex 自动校验数据库索引，仅在数据同步执行完成后执行一次。
+// Index fixing should not be performed before data synchronization https://github.com/siyuan-note/siyuan/issues/10761
+func checkIndex() {
+	checkIndexOnce.Do(func() {
+		if util.IsMobileContainer() {
+			// 移动端不执行校验 https://ld246.com/article/1734939896061
+			return
+		}
 
-	task.AppendTask(task.DatabaseIndexFix, removeDuplicateDatabaseRefs)
+		// 阻塞式获取锁：若 AutoFixIndex 正在跑则等其完成，确保唯一一次校验不会与之并发
+		fixIndexMu.Lock()
+		defer fixIndexMu.Unlock()
+
+		runFixIndexPipeline()
+	})
+}
+
+// runFixIndexPipeline 执行索引订正流水线并完成收尾（清除脏标志、记录订正时间）。
+// 调用方需持有 fixIndexMu。
+func runFixIndexPipeline() {
+	fixIndexPipeline()
+	// 收尾：清除脏标志并记录订正时间，避免在冷却期内被 AutoFixIndex 重复触发
+	util.MarkIndexClean()
+	lastFixedAt = time.Now()
+}
+
+// fixIndexPipeline 执行索引订正流水线。
+// 由 checkIndex（同步后一次性）与 AutoFixIndex（空闲触发）共用，调用方负责加 fixIndexMu 互斥锁。
+func fixIndexPipeline() {
+	logging.LogInfof("start fixing index...")
+
+	removeDuplicateDatabaseIndex()
+	sql.FlushQueue()
+
+	resetDuplicateBlocksOnFileSys()
+	sql.FlushQueue()
+
+	fixBlockTreeByFileSys()
+	sql.FlushQueue()
+
+	fixDatabaseIndexByBlockTree()
+	sql.FlushQueue()
+
+	removeDuplicateDatabaseRefs()
 
 	// 后面要加任务的话记得修改推送任务栏的进度 util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 1, 5))
 
-	task.AppendTask(task.DatabaseIndexFix, func() {
-		util.PushStatusBar(Conf.Language(185))
-	})
 	debug.FreeOSMemory()
+	util.PushStatusBar(Conf.Language(185))
+	logging.LogInfof("finish fixing index")
 }
 
-var autoFixLock = sync.Mutex{}
+// AutoFixIndex 在用户空闲且存在未订正变更时，自动订正索引。由 cron 每分钟调用。
+// 触发需同时满足：空闲达 idleFixThreshold、存在未订正变更（dirty）、冷却期已过。
+func AutoFixIndex() {
+	defer logging.Recover()
+
+	if util.IsMobileContainer() {
+		return
+	}
+	if !util.IsIdle(idleFixThreshold) {
+		return
+	}
+	if !util.IsIndexFixDirty() {
+		return
+	}
+	if !lastFixedAt.IsZero() && time.Since(lastFixedAt) < fixCooldown {
+		return
+	}
+	// TryLock 非阻塞：若 checkIndex 正在跑或上次还没跑完，直接跳过，不堆积 goroutine
+	if !fixIndexMu.TryLock() {
+		return
+	}
+	defer fixIndexMu.Unlock()
+
+	// double-check：拿到锁后再确认一次确实空闲，避免在等待锁期间用户又开始操作
+	if !util.IsIdle(idleFixThreshold) {
+		return
+	}
+
+	logging.LogInfof("start auto fixing index on idle...")
+	runFixIndexPipeline()
+	logging.LogInfof("finish auto fixing index on idle")
+}
 
 // removeDuplicateDatabaseRefs 删除重复的数据库引用关系。
 func removeDuplicateDatabaseRefs() {
 	defer logging.Recover()
-
-	autoFixLock.Lock()
-	defer autoFixLock.Unlock()
 
 	util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 5, 5))
 	duplicatedRootIDs := sql.GetRefDuplicatedDefRootIDs()
@@ -87,16 +161,10 @@ func removeDuplicateDatabaseRefs() {
 func removeDuplicateDatabaseIndex() {
 	defer logging.Recover()
 
-	autoFixLock.Lock()
-	defer autoFixLock.Unlock()
-
 	util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 1, 5))
 	duplicatedRootIDs := sql.GetDuplicatedRootIDs("blocks")
 	if 1 > len(duplicatedRootIDs) {
 		duplicatedRootIDs = sql.GetDuplicatedRootIDs("blocks_fts")
-		if 1 > len(duplicatedRootIDs) && !Conf.Search.CaseSensitive {
-			duplicatedRootIDs = sql.GetDuplicatedRootIDs("blocks_fts_case_insensitive")
-		}
 	}
 
 	roots := sql.GetBlocks(duplicatedRootIDs)
@@ -133,15 +201,16 @@ func removeDuplicateDatabaseIndex() {
 func resetDuplicateBlocksOnFileSys() {
 	defer logging.Recover()
 
-	autoFixLock.Lock()
-	defer autoFixLock.Unlock()
-
 	util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 2, 5))
 	boxes := Conf.GetBoxes()
 	luteEngine := lute.New()
 	blockIDs := map[string]bool{}
 	needRefreshUI := false
 	for _, box := range boxes {
+		// 关闭的加密笔记本无法解密 .sy，跳过（避免密文被当损坏移走）
+		if IsEncryptedBox(box.ID) && !IsBoxUnlocked(box.ID) {
+			continue
+		}
 		// 校验索引阶段自动删除历史遗留的笔记本 history 文件夹
 		legacyHistory := filepath.Join(util.DataDir, box.ID, ".siyuan", "history")
 		if gulu.File.IsDir(legacyHistory) {
@@ -154,30 +223,22 @@ func resetDuplicateBlocksOnFileSys() {
 
 		boxPath := filepath.Join(util.DataDir, box.ID)
 		var duplicatedTrees []*parse.Tree
-		filelock.Walk(boxPath, func(path string, info os.FileInfo, err error) error {
-			if nil == info {
+		filelock.Walk(boxPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || nil == d {
 				return nil
 			}
 
-			if info.IsDir() {
+			if d.IsDir() {
 				if boxPath == path {
-					// 跳过根路径（笔记本文件夹）
+					// 跳过笔记本文件夹
 					return nil
 				}
 
-				if strings.HasPrefix(info.Name(), ".") {
+				if strings.HasPrefix(d.Name(), ".") {
 					return filepath.SkipDir
 				}
 
-				if !ast.IsNodeIDPattern(info.Name()) {
-					return nil
-				}
-
-				if util.IsEmptyDir(filepath.Join(path)) {
-					// 删除空的子文档文件夹
-					if removeErr := os.RemoveAll(path); nil != removeErr {
-						logging.LogErrorf("remove empty folder failed: %s", removeErr)
-					}
+				if !ast.IsNodeIDPattern(d.Name()) {
 					return nil
 				}
 				return nil
@@ -187,7 +248,7 @@ func resetDuplicateBlocksOnFileSys() {
 				return nil
 			}
 
-			if !ast.IsNodeIDPattern(strings.TrimSuffix(info.Name(), ".sy")) {
+			if !ast.IsNodeIDPattern(strings.TrimSuffix(d.Name(), ".sy")) {
 				logging.LogWarnf("invalid .sy file name [%s]", path)
 				box.moveCorruptedData(path)
 				return nil
@@ -209,8 +270,7 @@ func resetDuplicateBlocksOnFileSys() {
 
 				if "" == n.ID {
 					needOverwrite = true
-					n.ID = ast.NewNodeID()
-					n.SetIALAttr("id", n.ID)
+					treenode.ResetNodeID(n)
 					return ast.WalkContinue
 				}
 
@@ -230,15 +290,14 @@ func resetDuplicateBlocksOnFileSys() {
 
 				// 其他情况，重置节点 ID
 				needOverwrite = true
-				n.ID = ast.NewNodeID()
-				n.SetIALAttr("id", n.ID)
+				treenode.ResetNodeID(n)
 				needRefreshUI = true
 				return ast.WalkContinue
 			})
 
 			if needOverwrite {
 				logging.LogWarnf("exist more than one node with the same id in tree [%s], reset it", box.ID+p)
-				if writeErr := filesys.WriteTree(tree); nil != writeErr {
+				if _, writeErr := filesys.WriteTree(tree); nil != writeErr {
 					logging.LogErrorf("write tree [%s] failed: %s", p, writeErr)
 				}
 			}
@@ -255,20 +314,17 @@ func resetDuplicateBlocksOnFileSys() {
 
 	if needRefreshUI {
 		util.ReloadUI()
-		go func() {
-			time.Sleep(time.Second * 3)
-			util.PushMsg(Conf.Language(190), 5000)
-		}()
+		task.AppendAsyncTaskWithDelay(task.PushMsg, 3*time.Second, util.PushMsg, Conf.Language(190), 5000)
 	}
 }
 
 func recreateTree(tree *parse.Tree, absPath string) {
 	// 删除关于该树的所有块树数据，后面会调用 fixBlockTreeByFileSys() 进行订正补全
-	treenode.RemoveBlockTreesByPathPrefix(strings.TrimSuffix(tree.Path, ".sy"))
-	treenode.RemoveBlockTreesByRootID(tree.ID)
+	treenode.RemoveBlockTreesByPathPrefix(tree.Box, strings.TrimSuffix(tree.Path, ".sy"))
+	treenode.RemoveBlockTreesByRootID(tree.Box, tree.ID)
 
-	resetTree(tree, "")
-	if err := filesys.WriteTree(tree); nil != err {
+	resetTree(tree, "", true)
+	if _, err := filesys.WriteTree(tree); err != nil {
 		logging.LogWarnf("write tree [%s] failed: %s", tree.Path, err)
 		return
 	}
@@ -283,7 +339,7 @@ func recreateTree(tree *parse.Tree, absPath string) {
 		}
 	}
 
-	if err := os.RemoveAll(absPath); nil != err {
+	if err := filelock.Remove(absPath); err != nil {
 		logging.LogWarnf("remove [%s] failed: %s", absPath, err)
 		return
 	}
@@ -293,27 +349,24 @@ func recreateTree(tree *parse.Tree, absPath string) {
 func fixBlockTreeByFileSys() {
 	defer logging.Recover()
 
-	autoFixLock.Lock()
-	defer autoFixLock.Unlock()
-
 	util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 3, 5))
 	boxes := Conf.GetOpenedBoxes()
 	luteEngine := lute.New()
 	for _, box := range boxes {
 		boxPath := filepath.Join(util.DataDir, box.ID)
 		var paths []string
-		filelock.Walk(boxPath, func(path string, info os.FileInfo, err error) error {
+		filelock.Walk(boxPath, func(path string, d fs.DirEntry, err error) error {
+			if nil != err || nil == d {
+				return nil
+			}
+
 			if boxPath == path {
 				// 跳过根路径（笔记本文件夹）
 				return nil
 			}
 
-			if nil == info {
-				return nil
-			}
-
-			if info.IsDir() {
-				if strings.HasPrefix(info.Name(), ".") {
+			if d.IsDir() {
+				if strings.HasPrefix(d.Name(), ".") {
 					return filepath.SkipDir
 				}
 				return nil
@@ -357,6 +410,9 @@ func fixBlockTreeByFileSys() {
 	// 清理已关闭的笔记本块树
 	boxes = Conf.GetClosedBoxes()
 	for _, box := range boxes {
+		if IsEncryptedBox(box.ID) && !IsBoxUnlocked(box.ID) {
+			continue
+		}
 		treenode.RemoveBlockTreesByBoxID(box.ID)
 	}
 }
@@ -368,7 +424,7 @@ func fixDatabaseIndexByBlockTree() {
 	util.PushStatusBar(fmt.Sprintf(Conf.Language(58), 4, 5))
 	rootUpdatedMap := treenode.GetRootUpdated()
 	dbRootUpdatedMap, err := sql.GetRootUpdated()
-	if nil == err {
+	if err == nil {
 		reindexTreeByUpdated(rootUpdatedMap, dbRootUpdatedMap)
 	}
 }
@@ -411,7 +467,7 @@ func reindexTreeByUpdated(rootUpdatedMap, dbRootUpdatedMap map[string]string) {
 	}
 
 	var rootIDs []string
-	for rootID, _ := range dbRootUpdatedMap {
+	for rootID := range dbRootUpdatedMap {
 		if _, ok := rootUpdatedMap[rootID]; !ok {
 			rootIDs = append(rootIDs, rootID)
 		}
@@ -444,7 +500,7 @@ func reindexTreeByUpdated(rootUpdatedMap, dbRootUpdatedMap map[string]string) {
 
 func reindexTreeByPath(box, p string, i, size int, luteEngine *lute.Lute) {
 	tree, err := filesys.LoadTree(box, p, luteEngine)
-	if nil != err {
+	if err != nil {
 		return
 	}
 
@@ -459,10 +515,10 @@ func reindexTree(rootID string, i, size int, luteEngine *lute.Lute) {
 	}
 
 	tree, err := filesys.LoadTree(root.BoxID, root.Path, luteEngine)
-	if nil != err {
+	if err != nil {
 		if os.IsNotExist(err) {
 			// 文件系统上没有找到该 .sy 文件，则订正块树
-			treenode.RemoveBlockTreesByRootID(rootID)
+			treenode.RemoveBlockTreesByRootID(root.BoxID, rootID)
 		}
 		return
 	}
@@ -475,10 +531,10 @@ func reindexTree0(tree *parse.Tree, i, size int) {
 	if "" == updated {
 		updated = util.TimeFromID(tree.Root.ID)
 		tree.Root.SetIALAttr("updated", updated)
-		indexWriteJSONQueue(tree)
+		indexWriteTreeUpsertQueue(tree)
 	} else {
-		treenode.IndexBlockTree(tree)
-		sql.IndexTreeQueue(tree.Box, tree.Path)
+		treenode.UpsertBlockTree(tree)
+		sql.IndexTreeQueue(tree)
 	}
 
 	if 0 == i%64 {

@@ -1,8 +1,12 @@
 import {isMac, isNotCtrl, isOnlyMeta} from "./compatibility";
 import {Constants} from "../../constants";
+import {getKeymapBindings, IShortcutKeymap, normalizeShortcutKey, visitKeymapItems} from "../../util/keymapBindings";
 
 // 是否匹配辅助键 ⌃⌥⇧⌘
-export const matchAuxiliaryHotKey = (hotKey: string, event: KeyboardEvent) => {
+export const matchAuxiliaryHotKey = (hotKey: string | IShortcutKeymap, event: KeyboardEvent): boolean => {
+    if (typeof hotKey !== "string") {
+        return getKeymapBindings(hotKey).some(key => matchAuxiliaryHotKey(key, event));
+    }
     if (hotKey.includes("⌃")) {
         if (!event.ctrlKey) {
             return false;
@@ -42,21 +46,17 @@ export const matchAuxiliaryHotKey = (hotKey: string, event: KeyboardEvent) => {
     return true;
 };
 
-export const matchHotKey = (hotKey: string, event: KeyboardEvent) => {
+export const matchHotKey = (hotKey: string | IShortcutKeymap, event: KeyboardEvent): boolean => {
+    if (typeof hotKey !== "string") {
+        return getKeymapBindings(hotKey).some(key => matchHotKey(key, event));
+    }
     if (!hotKey) {
         return false;
     }
 
-    // https://github.com/siyuan-note/siyuan/issues/9770
-    if (hotKey.startsWith("⌃") && !isMac()) {
-        if (hotKey === "⌃D") {
-            // https://github.com/siyuan-note/siyuan/issues/9841
-            return false;
-        }
-        hotKey = hotKey.replace("⌘", "").replace("⌃", "⌘")
-            .replace("⌘⇧", "⇧⌘")
-            .replace("⌘⌥⇧", "⌥⇧⌘")
-            .replace("⌘⌥", "⌥⌘");
+    hotKey = normalizeShortcutKey(hotKey, isMac());
+    if (!hotKey) {
+        return false;
     }
 
     // []
@@ -67,17 +67,16 @@ export const matchHotKey = (hotKey: string, event: KeyboardEvent) => {
         return false;
     }
 
-    const hotKeys = hotKey.split("");
-    if (hotKey.indexOf("F") > -1) {
-        hotKeys.forEach((item, index) => {
-            if (item === "F") {
-                // F1-F12
-                hotKeys[index] = "F" + hotKeys.splice(index + 1, 1);
-                if (hotKeys[index + 1]) {
-                    hotKeys[index + 1] += hotKeys.splice(index + 1, 1);
-                }
-            }
-        });
+    // 将快捷键字符串拆分为 多个修饰键 + 一个主键，例如 ⌥⇧F10 → ["⌥", "⇧", "F10"]
+    const hotKeys: string[] = [];
+    let hotKeyIndex = 0;
+    while (hotKeyIndex < hotKey.length && "⌃⌥⇧⌘".includes(hotKey[hotKeyIndex])) {
+        hotKeys.push(hotKey[hotKeyIndex]);
+        hotKeyIndex++;
+    }
+    const mainKey = hotKey.slice(hotKeyIndex);
+    if (mainKey) {
+        hotKeys.push(mainKey);
     }
 
     // 是否匹配 ⇧[]
@@ -95,7 +94,7 @@ export const matchHotKey = (hotKey: string, event: KeyboardEvent) => {
         }
         const isMatchKey = keyCode === Constants.KEYCODELIST[event.keyCode];
         // 是否匹配 ⌥[] / ⌥⌘[]
-        if (isMatchKey && event.altKey && !event.shiftKey &&
+        if (isMatchKey && event.altKey && !event.shiftKey && hotKeys.length < 4 &&
             (hotKeys.length === 3 ? (isOnlyMeta(event) && hotKey.startsWith("⌥⌘")) : isNotCtrl(event))) {
             return true;
         }
@@ -166,3 +165,12 @@ export const matchHotKey = (hotKey: string, event: KeyboardEvent) => {
     return false;
 };
 
+export const isIncludesHotKey = (hotKey: string) => {
+    let included = false;
+    visitKeymapItems(window.siyuan.config.keymap, item => {
+        if (getKeymapBindings(item).includes(hotKey)) {
+            included = true;
+        }
+    });
+    return included;
+};

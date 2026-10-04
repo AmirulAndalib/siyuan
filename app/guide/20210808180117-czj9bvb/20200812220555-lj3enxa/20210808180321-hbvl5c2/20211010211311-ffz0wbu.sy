@@ -1,11 +1,12 @@
 {
 	"ID": "20211010211311-ffz0wbu",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20211010211311-ffz0wbu",
 		"title": "虚拟引用",
-		"updated": "20221003214924"
+		"type": "doc",
+		"updated": "20260809232000"
 	},
 	"Children": [
 		{
@@ -99,7 +100,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20211010211708-0qn8cpl",
-				"updated": "20211010211737"
+				"updated": "20260803163440"
 			},
 			"Children": [
 				{
@@ -123,12 +124,53 @@
 			]
 		},
 		{
+			"ID": "20240228163645-zvlgahq",
+			"Type": "NodeParagraph",
+			"Properties": {
+				"id": "20240228163645-zvlgahq",
+				"updated": "20260803163440"
+			},
+			"Children": [
+				{
+					"Type": "NodeText",
+					"Data": "可在 "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "设置"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "搜索"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​ - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
+					"TextMarkTextContent": "虚拟引用"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " ​ 中调整关键字搜索范围。"
+				}
+			]
+		},
+		{
 			"ID": "20221003214348-710vren",
 			"Type": "NodeHeading",
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20221003214348-710vren",
-				"updated": "20221003214410"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -144,7 +186,7 @@
 			"ListData": {},
 			"Properties": {
 				"id": "20221003214411-d3c0jte",
-				"updated": "20221003214924"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -156,7 +198,7 @@
 					},
 					"Properties": {
 						"id": "20221003214412-j7wcb07",
-						"updated": "20221003214924"
+						"updated": "20260809232000"
 					},
 					"Children": [
 						{
@@ -164,21 +206,12 @@
 							"Type": "NodeParagraph",
 							"Properties": {
 								"id": "20221003214412-uixysyj",
-								"updated": "20221003214924"
+								"updated": "20260809232000"
 							},
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "出于性能考虑，虚拟引用并不是即时生效的，如果没有显示，可以尝试通过 "
-								},
-								{
-									"Type": "NodeTextMark",
-									"TextMarkType": "kbd",
-									"TextMarkTextContent": "F5"
-								},
-								{
-									"Type": "NodeText",
-									"Data": "​ 刷新当前文档"
+									"Data": "虚拟引用不会即时更新。请等待搜索索引完成后刷新或重新打开文档；如果关键词仍未更新，再尝试重建索引。"
 								}
 							]
 						}

@@ -3,19 +3,22 @@ import * as path from "path";
 /// #endif
 import {matchHotKey} from "../../protyle/util/hotKey";
 import {fetchPost} from "../../util/fetch";
-import {openFileById} from "../../editor/util";
 import {Constants} from "../../constants";
-import {newFileByName} from "../../util/newFile";
-import {App} from "../../index";
+import {newFile} from "../../util/newFile";
+import type {App} from "../../index";
 import {Dialog} from "../../dialog";
 import {getAllModels} from "../../layout/getAll";
 import {hasClosestByClassName} from "../../protyle/util/hasClosest";
-import {getArticle, inputEvent, replace, toggleReplaceHistory, toggleSearchHistory} from "../../search/util";
-import {showFileInFolder} from "../../util/pathName";
-import {assetInputEvent, renderPreview, toggleAssetHistory} from "../../search/assets";
+import {getArticle, inputEvent, openSearchEditor, replace} from "../../search/util";
+import {useShell} from "../../util/pathName";
+import {assetInputEvent, renderPreview} from "../../search/assets";
 import {initSearchMenu} from "../../menus/search";
 import {writeText} from "../../protyle/util/compatibility";
-import {checkFold} from "../../util/noRelyPCFunction";
+import {getUnRefList} from "../../search/unRef";
+import {toggleAssetHistory, toggleReplaceHistory, toggleSearchHistory} from "../../search/toggleHistory";
+import {Protyle} from "../../protyle";
+import {getKeysByLiElement} from "../../search/menu";
+import {getHostCapabilities} from "../../util/hostCapabilities";
 
 export const searchKeydown = (app: App, event: KeyboardEvent) => {
     if (getSelection().rangeCount === 0) {
@@ -27,14 +30,16 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
     }
     let element: HTMLElement;
     let dialog: Dialog;
-    let edit;
-    let config: ISearchOption;
+    let edit: Protyle;
+    let unRefEdit;
+    let config: Config.IUILayoutTabSearchConfig;
     window.siyuan.dialogs.find((item) => {
         if (item.element.contains(range.startContainer) && item.element.querySelector("#searchList")) {
             element = item.element.querySelector(".b3-dialog__body");
             dialog = item;
             config = dialog.data;
-            edit = dialog.editor;
+            edit = dialog.editors.edit;
+            unRefEdit = dialog.editors.unRefEdit;
             return true;
         }
     });
@@ -42,8 +47,9 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
         getAllModels().search.find((item) => {
             if (item.element.contains(range.startContainer)) {
                 element = item.element;
-                edit = item.edit;
+                edit = item.editors.edit;
                 config = item.config;
+                unRefEdit = item.editors.unRefEdit;
                 return true;
             }
         });
@@ -52,22 +58,23 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
         return false;
     }
     const assetsElement = element.querySelector("#searchAssets");
-    const isAsset = !assetsElement.classList.contains("fn__none");
-    const listElement = isAsset ? assetsElement.querySelector("#searchAssetList") : element.querySelector("#searchList");
+    const unRefElement = element.querySelector("#searchUnRefPanel");
+    const searchType = assetsElement.classList.contains("fn__none") ? (unRefElement.classList.contains("fn__none") ? "doc" : "unRef") : "asset";
+    const listElement = searchType === "asset" ? assetsElement.querySelector("#searchAssetList") : (searchType === "doc" ? element.querySelector("#searchList") : unRefElement.querySelector("#searchUnRefList"));
     const searchInputElement = element.querySelector("#searchInput") as HTMLInputElement;
-    if (!isAsset && matchHotKey(window.siyuan.config.keymap.general.newFile.custom, event)) {
+    if (searchType === "doc" && matchHotKey(window.siyuan.config.keymap.general.newFile, event)) {
         if (config.method === 0) {
-            newFileByName(app, searchInputElement.value);
+            newFile(app, searchInputElement.value);
         }
         return true;
     }
     const targetId = (event.target as HTMLElement).id;
     if (event.key === "ArrowDown" && event.altKey) {
-        if (isAsset) {
+        if (searchType === "asset") {
             toggleAssetHistory(assetsElement);
-        } else {
+        } else if (searchType === "doc") {
             if (targetId === "replaceInput") {
-                toggleReplaceHistory(element);
+                toggleReplaceHistory(element.querySelector("#replaceInput"));
             } else {
                 toggleSearchHistory(element, config, edit);
             }
@@ -85,30 +92,31 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
     }
     if (currentList.getAttribute("data-type") === "search-new") {
         if (event.key === "Enter" && config.method === 0) {
-            newFileByName(app, searchInputElement.value);
+            newFile(app, searchInputElement.value);
             return true;
         }
         return false;
     }
-    if (!isAsset) {
-        if (matchHotKey(window.siyuan.config.keymap.editor.general.insertRight.custom, event)) {
-            const id = currentList.getAttribute("data-node-id");
-            checkFold(id, (zoomIn, action) => {
-                openFileById({
-                    app,
-                    id,
-                    position: "right",
-                    action,
-                    zoomIn
-                });
-                if (dialog) {
-                    dialog.destroy({focus: "false"});
-                }
+    if (searchType !== "asset") {
+        if (matchHotKey(window.siyuan.config.keymap.editor.general.insertRight, event)) {
+            openSearchEditor({
+                protyle: edit.protyle,
+                rootId: currentList.getAttribute("data-root-id"),
+                id: currentList.getAttribute("data-node-id"),
+                cb: () => {
+                    if (dialog) {
+                        dialog.destroy({focus: "false"});
+                    }
+                },
+                openPosition: "right",
+                nodeType: currentList.dataset.nodeType,
+                method: config.method,
+                keywords: getKeysByLiElement(currentList),
             });
             return true;
         }
         const id = currentList.getAttribute("data-node-id");
-        if (matchHotKey("⌘/", event)) {
+        if (matchHotKey(window.siyuan.config.keymap.general.openContextMenu, event)) {
             const currentRect = currentList.getBoundingClientRect();
             initSearchMenu(id).popup({
                 x: currentRect.left + 30,
@@ -116,27 +124,27 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
             });
             return true;
         }
-        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyBlockRef.custom, event)) {
+        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyBlockRef, event)) {
             fetchPost("/api/block/getRefText", {id}, (response) => {
                 writeText(`((${id} '${response.data}'))`);
             });
             return true;
         }
-        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyBlockEmbed.custom, event)) {
+        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyBlockEmbed, event)) {
             writeText(`{{select * from blocks where id='${id}'}}`);
             return true;
         }
-        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyProtocol.custom, event)) {
+        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyProtocol, event)) {
             writeText(`siyuan://blocks/${id}`);
             return true;
         }
-        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyProtocolInMd.custom, event)) {
+        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyProtocolInMd, event)) {
             fetchPost("/api/block/getRefText", {id}, (response) => {
                 writeText(`[${response.data}](siyuan://blocks/${id})`);
             });
             return true;
         }
-        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyHPath.custom, event)) {
+        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyHPath, event)) {
             fetchPost("/api/filetree/getHPathByID", {
                 id
             }, (response) => {
@@ -144,14 +152,14 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
             });
             return true;
         }
-        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyID.custom, event)) {
+        if (matchHotKey(window.siyuan.config.keymap.editor.general.copyID, event)) {
             writeText(id);
             return true;
         }
     }
 
     if (Constants.KEYCODELIST[event.keyCode] === "PageUp") {
-        if (isAsset) {
+        if (searchType === "asset") {
             if (!assetsElement.querySelector('[data-type="assetPrevious"]').getAttribute("disabled")) {
                 let currentPage = parseInt(assetsElement.querySelector("#searchAssetResult .fn__flex-center").textContent.split("/")[0]);
                 if (currentPage > 1) {
@@ -159,18 +167,26 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
                     assetInputEvent(assetsElement, assetLocal, currentPage);
                 }
             }
-        } else {
+        } else if (searchType === "doc") {
             if (!element.querySelector('[data-type="previous"]').getAttribute("disabled")) {
                 if (config.page > 1) {
                     config.page--;
                     inputEvent(element, config, edit);
                 }
             }
+        } else if (searchType === "unRef") {
+            if (!element.querySelector('[data-type="unRefPrevious"]').getAttribute("disabled")) {
+                let currentPage = parseInt(unRefElement.querySelector("#searchUnRefResult").textContent);
+                if (currentPage > 1) {
+                    currentPage--;
+                    getUnRefList(unRefElement, unRefEdit, currentPage);
+                }
+            }
         }
         return true;
     }
     if (Constants.KEYCODELIST[event.keyCode] === "PageDown") {
-        if (isAsset) {
+        if (searchType === "asset") {
             if (!assetsElement.querySelector('[data-type="assetNext"]').getAttribute("disabled")) {
                 const assetPages = assetsElement.querySelector("#searchAssetResult .fn__flex-center").textContent.split("/");
                 let currentPage = parseInt(assetPages[0]);
@@ -179,12 +195,20 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
                     assetInputEvent(assetsElement, assetLocal, currentPage);
                 }
             }
-        } else {
+        } else if (searchType === "doc") {
             const nextElement = element.querySelector('[data-type="next"]');
             if (!nextElement.getAttribute("disabled")) {
                 if (config.page < parseInt(nextElement.parentElement.querySelector("#searchResult").getAttribute("data-pagecount"))) {
                     config.page++;
                     inputEvent(element, config, edit);
+                }
+            }
+        } else if (searchType === "unRef") {
+            if (!element.querySelector('[data-type="unRefNext"]').getAttribute("disabled")) {
+                let currentPage = parseInt(unRefElement.querySelector("#searchUnRefResult").textContent);
+                if (currentPage < parseInt(unRefElement.querySelector("#searchUnRefResult").textContent.split("/")[1])) {
+                    currentPage++;
+                    getUnRefList(unRefElement, unRefEdit, currentPage);
                 }
             }
         }
@@ -194,26 +218,29 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
         return false;
     }
     if (event.key === "Enter") {
-        if (!isAsset) {
+        if (searchType !== "asset") {
             if (targetId === "replaceInput") {
                 replace(element, config, edit, false);
             } else {
-                const id = currentList.getAttribute("data-node-id");
-                checkFold(id, (zoomIn, action) => {
-                    openFileById({
-                        app,
-                        id,
-                        action,
-                        zoomIn
-                    });
-                    if (dialog) {
-                        dialog.destroy({focus: "false"});
-                    }
+                openSearchEditor({
+                    rootId: currentList.getAttribute("data-root-id"),
+                    protyle: edit.protyle,
+                    id: currentList.getAttribute("data-node-id"),
+                    cb: () => {
+                        if (dialog) {
+                            dialog.destroy({focus: "false"});
+                        }
+                    },
+                    nodeType: currentList.dataset.nodeType,
+                    method: config.method,
+                    keywords: getKeysByLiElement(currentList),
                 });
             }
         } else {
             /// #if !BROWSER
-            showFileInFolder(path.join(window.siyuan.config.system.dataDir, currentList.lastElementChild.getAttribute("aria-label")));
+            if (getHostCapabilities().localFileSystem) {
+                useShell("showItemInFolder", path.join(window.siyuan.config.system.dataDir, currentList.lastElementChild.getAttribute("aria-label")));
+            }
             /// #endif
         }
         return true;
@@ -223,7 +250,7 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
     if (event.key === "ArrowDown") {
         currentList.classList.remove("b3-list-item--focus");
         if (!currentList.nextElementSibling) {
-            if (config.group === 1 && !isAsset) {
+            if (config.group === 1 && searchType === "doc") {
                 if (currentList.parentElement.nextElementSibling) {
                     currentList.parentElement.nextElementSibling.nextElementSibling.firstElementChild.classList.add("b3-list-item--focus");
                 } else {
@@ -240,14 +267,19 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
             listElement.scrollTop > currentList.offsetTop) {
             listElement.scrollTop = currentList.offsetTop - listElement.clientHeight + lineHeight;
         }
-        if (isAsset) {
+        if (searchType === "asset") {
             renderPreview(assetPreviewElement, currentList.dataset.id, searchInputElement.value, assetLocal.method);
-        } else {
+        } else if (searchType === "doc") {
             getArticle({
                 id: currentList.getAttribute("data-node-id"),
                 config,
                 value: searchInputElement.value,
                 edit,
+            });
+        } else {
+            getArticle({
+                id: currentList.getAttribute("data-node-id"),
+                edit: unRefEdit,
             });
         }
         return true;
@@ -255,7 +287,7 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
     if (event.key === "ArrowUp") {
         currentList.classList.remove("b3-list-item--focus");
         if (!currentList.previousElementSibling) {
-            if (config.group === 1 && !isAsset) {
+            if (config.group === 1 && searchType === "doc") {
                 if (currentList.parentElement.previousElementSibling.previousElementSibling) {
                     currentList.parentElement.previousElementSibling.previousElementSibling.lastElementChild.classList.add("b3-list-item--focus");
                 } else {
@@ -272,14 +304,19 @@ export const searchKeydown = (app: App, event: KeyboardEvent) => {
             listElement.scrollTop > currentList.offsetTop - lineHeight * 2) {
             listElement.scrollTop = currentList.offsetTop - lineHeight * 2;
         }
-        if (isAsset) {
+        if (searchType === "asset") {
             renderPreview(assetPreviewElement, currentList.dataset.id, searchInputElement.value, assetLocal.method);
-        } else {
+        } else if (searchType === "doc") {
             getArticle({
                 id: currentList.getAttribute("data-node-id"),
                 config,
                 value: searchInputElement.value,
                 edit,
+            });
+        } else if (searchType === "unRef") {
+            getArticle({
+                id: currentList.getAttribute("data-node-id"),
+                edit: unRefEdit,
             });
         }
         return true;

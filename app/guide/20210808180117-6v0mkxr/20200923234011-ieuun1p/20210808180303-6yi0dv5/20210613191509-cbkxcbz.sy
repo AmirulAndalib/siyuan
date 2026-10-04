@@ -1,11 +1,12 @@
 {
 	"ID": "20210613191509-cbkxcbz",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20210613191509-cbkxcbz",
 		"title": "Content Block Attribute",
-		"updated": "20210613191548"
+		"type": "doc",
+		"updated": "20260922175346"
 	},
 	"Children": [
 		{
@@ -43,7 +44,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20210613191548-ckua3q3",
-				"updated": "20210613191548"
+				"updated": "20260922175346"
 			},
 			"Children": [
 				{
@@ -61,7 +62,7 @@
 			],
 			"Properties": {
 				"id": "20210613191548-n6dt4hc",
-				"updated": "20210613191633"
+				"updated": "20260922175346"
 			},
 			"Children": [
 				{
@@ -145,7 +146,38 @@
 							"Children": [
 								{
 									"Type": "NodeText",
-									"Data": "Alias of content block"
+									"Data": "Alias of the content block. In the attribute panel, aliases appear as separate chips. Click Add alias to add one or click an existing alias to edit it; click its close icon to remove it. Separate multiple aliases with English commas to add them together. Press "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "Enter"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " to save, or move focus away from the input. Press "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "Esc"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " to cancel the current input. Leading and trailing whitespace, empty entries and exact duplicates are removed from new input."
+								},
+								{
+									"Type": "NodeText",
+									"Data": " Drag aliases to reorder them; the order is saved when you release. Touchscreens also support dragging. Press "
+								},
+								{
+									"Type": "NodeTextMark",
+									"TextMarkType": "kbd",
+									"TextMarkTextContent": "Esc"
+								},
+								{
+									"Type": "NodeText",
+									"Data": " while dragging to cancel the reorder."
 								}
 							]
 						}
@@ -213,7 +245,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20210613191548-65gd8yo",
-				"updated": "20210613191548"
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
@@ -223,34 +255,34 @@
 			]
 		},
 		{
-			"ID": "20210613191548-7p2bvoq",
+			"ID": "20251201102224-5uvilvm",
 			"Type": "NodeParagraph",
 			"Properties": {
-				"id": "20210613191548-7p2bvoq",
-				"updated": "20210613191746"
+				"id": "20251201102224-5uvilvm",
+				"updated": "20260803171606"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "The user-defined attributes are set by the user through the "
+					"Data": "Custom attributes are set by the user through the "
 				},
 				{
 					"Type": "NodeTextMark",
-					"TextMarkType": "code",
+					"TextMarkType": "code kbd",
 					"TextMarkTextContent": "Block icon menu"
 				},
 				{
 					"Type": "NodeText",
-					"Data": " -"
+					"Data": "​ - "
 				},
 				{
 					"Type": "NodeTextMark",
-					"TextMarkType": "code",
+					"TextMarkType": "code kbd",
 					"TextMarkTextContent": "Attribute"
 				},
 				{
 					"Type": "NodeText",
-					"Data": ", and only English letters and Arabic numerals are allowed in the attribute name (such as "
+					"Data": "​, attribute names can only use lowercase English letters and Arabic numerals and must begin with a letter (e.g., "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -259,16 +291,16 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": ", "
+					"Data": "​, "
 				},
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "7days"
+					"TextMarkTextContent": "day1"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "). After setting, SiYuan will automatically prefix the attribute name with "
+					"Data": "​). After setting, SiYuan will automatically add the prefix "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -277,7 +309,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": " to distinguish built-in attributes from custom attributes."
+					"Data": "​ to the attribute name to distinguish it from built-in attributes."
 				}
 			]
 		},
