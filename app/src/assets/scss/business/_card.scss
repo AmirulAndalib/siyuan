@@ -1,3 +1,5 @@
+@use "../util/function";
+
 .card {
   &__main {
     @extend .fn__flex-column;
@@ -20,6 +22,10 @@
     align-items: center;
     border-radius: 0 0 var(--b3-border-radius-b) var(--b3-border-radius-b);
 
+    &-icon {
+      font-variant-emoji: emoji;
+    }
+
     &--space {
       padding: 16px;
     }
@@ -38,13 +44,6 @@
       padding: 8px 0;
       display: block;
       width: 100%;
-
-      & > div {
-        font-size: 32px;
-        display: block;
-        line-height: 46px;
-        margin-bottom: 4px;
-      }
     }
 
     & > div {
@@ -69,8 +68,16 @@
     }
   }
 
+  &__icon {
+    font-size: 32px;
+    display: block;
+    line-height: 46px;
+    margin-bottom: 4px;
+    font-variant-emoji: emoji;
+  }
+
   &__block {
-    .protyle-wysiwyg [data-node-id][custom-riff-decks] {
+    .protyle-wysiwyg:not([data-doc-type="NodeDocument"]) [data-node-id][custom-riff-decks] {
       box-shadow: none;
     }
 
@@ -91,6 +98,14 @@
     }
 
     &--hidesb .protyle-wysiwyg > .sb[custom-riff-decks] > div:nth-of-type(n+2):not(.protyle-attr) {
+      display: none;
+    }
+
+    &--hidebq .protyle-wysiwyg > .bq[custom-riff-decks] > [data-node-id] ~ [data-node-id] {
+      display: none;
+    }
+
+    &--hidecallout .protyle-wysiwyg > .callout[custom-riff-decks] > .callout-content {
       display: none;
     }
 

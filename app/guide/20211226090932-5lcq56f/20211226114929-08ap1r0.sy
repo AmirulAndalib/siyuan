@@ -1,12 +1,13 @@
 {
 	"ID": "20211226114929-08ap1r0",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"icon": "1f64f",
 		"id": "20211226114929-08ap1r0",
 		"title": "致謝",
-		"updated": "20230821234659"
+		"type": "doc",
+		"updated": "20261016202635"
 	},
 	"Children": [
 		{
@@ -28,12 +29,12 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230820175833-yka2sly",
-				"updated": "20230820180117"
+				"updated": "20261016202635"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "思源的成長離不開用戶的反饋和宣傳推廣，感謝所有人對思源的幫助 ❤️"
+					"Data": "思源的成長離不開用戶的反饋和宣傳推廣，感謝所有人對思源的幫助。 ❤️"
 				}
 			]
 		}

@@ -1,18 +1,6 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package util
 
@@ -33,15 +21,16 @@ const (
 )
 
 type Result struct {
-	Cmd       string      `json:"cmd"`
-	ReqId     float64     `json:"reqId"`
-	AppId     string      `json:"app"`
-	SessionId string      `json:"sid"`
-	PushMode  PushMode    `json:"pushMode"`
-	Callback  interface{} `json:"callback"`
-	Code      int         `json:"code"`
-	Msg       string      `json:"msg"`
-	Data      interface{} `json:"data"`
+	Cmd       string         `json:"cmd"`
+	ReqId     float64        `json:"reqId"`
+	AppId     string         `json:"app"`
+	SessionId string         `json:"sid"`
+	PushMode  PushMode       `json:"pushMode"`
+	Callback  any            `json:"callback"`
+	Code      int            `json:"code"`
+	Msg       string         `json:"msg"`
+	Data      any            `json:"data"`
+	Context   map[string]any `json:"context,omitempty"`
 }
 
 func NewResult() *Result {
@@ -64,7 +53,7 @@ func NewCmdResult(cmdName string, cmdId float64, pushMode PushMode) *Result {
 
 func (r *Result) Bytes() []byte {
 	ret, err := gulu.JSON.MarshalJSON(r)
-	if nil != err {
+	if err != nil {
 		logging.LogErrorf("marshal result [%+v] failed [%s]", r, err)
 	}
 	return ret

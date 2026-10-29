@@ -1,18 +1,6 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package sql
 
@@ -38,10 +26,11 @@ type Ref struct {
 }
 
 func upsertRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
-	if err = deleteRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	removeRefCacheByPath(tree.Box, tree.Path)
+	if err = deleteRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
-	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
 	err = insertRefs(tx, tree)
@@ -49,11 +38,23 @@ func upsertRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
 }
 
 func deleteRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
-	if err = deleteRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	removeRefCacheByPath(tree.Box, tree.Path)
+	if err = deleteRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
-	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); nil != err {
+	if err = deleteFileAnnotationRefsByPath(tx, tree.Box, tree.Path); err != nil {
 		return
 	}
 	return
+}
+
+func insertRefs(tx *sql.Tx, tree *parse.Tree) (err error) {
+	refs, fileAnnotationRefs := refsFromTree(tree)
+	if err = insertBlockRefs(tx, refs); err != nil {
+		return
+	}
+	if err = insertFileAnnotationRefs(tx, fileAnnotationRefs); err != nil {
+		return
+	}
+	return err
 }

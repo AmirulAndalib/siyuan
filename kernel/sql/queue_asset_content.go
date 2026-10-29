@@ -1,18 +1,6 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package sql
 
@@ -33,8 +21,7 @@ import (
 var (
 	assetContentOperationQueue []*assetContentDBQueueOperation
 	assetContentDBQueueLock    = sync.Mutex{}
-
-	assetContentTxLock = sync.Mutex{}
+	assetContentTxLock         = sync.Mutex{}
 )
 
 type assetContentDBQueueOperation struct {
@@ -49,14 +36,18 @@ func FlushAssetContentTxJob() {
 	task.AppendTask(task.AssetContentDatabaseIndexCommit, FlushAssetContentQueue)
 }
 
-func FlushAssetContentQueue() {
-	ops := getAssetContentOperations()
-	if 1 > len(ops) {
-		return
-	}
-
+func FlushAssetContentQueue() error {
 	assetContentTxLock.Lock()
 	defer assetContentTxLock.Unlock()
+	ops := getAssetContentOperations()
+	total := len(ops)
+	if 1 > total {
+		return nil
+	}
+
+	if assetContentDB == nil {
+		return errors.New("asset content database is unavailable")
+	}
 	start := time.Now()
 
 	groupOpsTotal := map[string]int{}
@@ -64,32 +55,32 @@ func FlushAssetContentQueue() {
 		groupOpsTotal[op.action]++
 	}
 
-	context := map[string]interface{}{eventbus.CtxPushMsg: eventbus.CtxPushMsgToStatusBar}
+	context := map[string]any{eventbus.CtxPushMsg: eventbus.CtxPushMsgToStatusBar}
 	groupOpsCurrent := map[string]int{}
 	for i, op := range ops {
 		if util.IsExiting.Load() {
-			return
+			return errors.New("asset content indexing interrupted by shutdown")
 		}
 
 		tx, err := beginAssetContentTx()
-		if nil != err {
-			return
+		if err != nil {
+			return err
 		}
 
 		groupOpsCurrent[op.action]++
 		context["current"] = groupOpsCurrent[op.action]
 		context["total"] = groupOpsTotal[op.action]
 
-		if err = execAssetContentOp(op, tx, context); nil != err {
+		if err = execAssetContentOp(op, tx, context); err != nil {
 			tx.Rollback()
 			logging.LogErrorf("queue operation failed: %s", err)
 			eventbus.Publish(util.EvtSQLAssetContentRebuild)
-			return
+			return err
 		}
 
-		if err = commitAssetContentTx(tx); nil != err {
+		if err = commitTx(tx); err != nil {
 			logging.LogErrorf("commit tx failed: %s", err)
-			return
+			return err
 		}
 
 		if 16 < i && 0 == i%128 {
@@ -97,49 +88,50 @@ func FlushAssetContentQueue() {
 		}
 	}
 
-	if 128 < len(ops) {
+	if 128 < total {
 		debug.FreeOSMemory()
 	}
 
-	elapsed := time.Now().Sub(start).Milliseconds()
+	elapsed := time.Since(start).Milliseconds()
 	if 7000 < elapsed {
 		logging.LogInfof("database asset content op tx [%dms]", elapsed)
 	}
+	return nil
 }
 
-func execAssetContentOp(op *assetContentDBQueueOperation, tx *sql.Tx, context map[string]interface{}) (err error) {
+func execAssetContentOp(op *assetContentDBQueueOperation, tx *sql.Tx, context map[string]any) (err error) {
 	switch op.action {
 	case "index":
 		err = insertAssetContents(tx, op.assetContents, context)
 	case "deletePath":
-		err = deleteAssetContentsByPath(tx, op.path, context)
+		err = deleteAssetContentsByPath(tx, op.path)
 	default:
 		msg := fmt.Sprintf("unknown asset content operation [%s]", op.action)
-		logging.LogErrorf(msg)
+		logging.LogErrorf("%s", msg)
 		err = errors.New(msg)
 	}
 	return
 }
 
 func DeleteAssetContentsByPathQueue(path string) {
-	assetContentTxLock.Lock()
-	defer assetContentTxLock.Unlock()
+	assetContentDBQueueLock.Lock()
+	defer assetContentDBQueueLock.Unlock()
 
 	newOp := &assetContentDBQueueOperation{inQueueTime: time.Now(), action: "deletePath", path: path}
 	assetContentOperationQueue = append(assetContentOperationQueue, newOp)
 }
 
 func IndexAssetContentsQueue(assetContents []*AssetContent) {
-	assetContentTxLock.Lock()
-	defer assetContentTxLock.Unlock()
+	assetContentDBQueueLock.Lock()
+	defer assetContentDBQueueLock.Unlock()
 
 	newOp := &assetContentDBQueueOperation{inQueueTime: time.Now(), action: "index", assetContents: assetContents}
 	assetContentOperationQueue = append(assetContentOperationQueue, newOp)
 }
 
 func getAssetContentOperations() (ops []*assetContentDBQueueOperation) {
-	assetContentTxLock.Lock()
-	defer assetContentTxLock.Unlock()
+	assetContentDBQueueLock.Lock()
+	defer assetContentDBQueueLock.Unlock()
 
 	ops = assetContentOperationQueue
 	assetContentOperationQueue = nil

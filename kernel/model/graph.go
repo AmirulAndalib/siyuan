@@ -1,24 +1,11 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package model
 
 import (
 	"bytes"
-	"github.com/siyuan-note/siyuan/kernel/util"
 	"math"
 	"strings"
 	"unicode/utf8"
@@ -28,8 +15,10 @@ import (
 	"github.com/88250/lute/html"
 	"github.com/88250/lute/parse"
 	"github.com/siyuan-note/logging"
+	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/sql"
 	"github.com/siyuan-note/siyuan/kernel/treenode"
+	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
 type GraphNode struct {
@@ -60,11 +49,13 @@ type GraphArrowsTo struct {
 }
 
 func BuildTreeGraph(id, query string) (boxID string, nodes []*GraphNode, links []*GraphLink) {
+	confGraphSnapshot := Conf.LoadGraph()
+
 	nodes = []*GraphNode{}
 	links = []*GraphLink{}
 
-	tree, err := loadTreeByBlockID(id)
-	if nil != err {
+	tree, err := LoadTreeByBlockID(id)
+	if err != nil {
 		return
 	}
 	node := treenode.GetNodeInTree(tree, id)
@@ -84,10 +75,10 @@ func BuildTreeGraph(id, query string) (boxID string, nodes []*GraphNode, links [
 	var sqlBlocks []*sql.Block
 	var rootID string
 	if ast.NodeDocument == node.Type {
-		sqlBlocks = sql.GetAllChildBlocks([]string{block.ID}, stmt)
+		sqlBlocks = sql.GetAllChildBlocks([]string{block.ID}, stmt, confGraphSnapshot.MaxBlocks)
 		rootID = block.ID
 	} else {
-		sqlBlocks = sql.GetChildBlocks(block.ID, stmt)
+		sqlBlocks = sql.GetChildBlocks(block.ID, stmt, confGraphSnapshot.MaxBlocks)
 	}
 	blocks := fromSQLBlocks(&sqlBlocks, "", 0)
 	if "" != rootID {
@@ -126,17 +117,17 @@ func BuildTreeGraph(id, query string) (boxID string, nodes []*GraphNode, links [
 				refBlocks := fromSQLBlocks(&sqlRefBs, "", 0)
 
 				if 0 < len(dailyNotesPaths) {
-					filterDailyNote := false
+					isDailyNote := false
 					var tmp []*Block
 					for _, refBlock := range refBlocks {
 						for _, dailyNotePath := range dailyNotesPaths {
 							if strings.HasPrefix(refBlock.HPath, dailyNotePath) {
-								filterDailyNote = true
+								isDailyNote = true
 								break
 							}
 						}
 
-						if !filterDailyNote {
+						if !isDailyNote {
 							tmp = append(tmp, refBlock)
 						}
 					}
@@ -149,12 +140,13 @@ func BuildTreeGraph(id, query string) (boxID string, nodes []*GraphNode, links [
 		}
 	}
 
+	blocks = filterDailyNote(blocks, true)
 	genTreeNodes(blocks, &nodes, &links, true)
 	growTreeGraph(&forwardlinks, &backlinks, &nodes)
 	blocks = append(blocks, forwardlinks...)
 	blocks = append(blocks, backlinks...)
 	buildLinks(&blocks, &links, true)
-	if Conf.Graph.Local.Tag {
+	if confGraphSnapshot.Local.Tag {
 		p := sqlBlock.Path
 		linkTagBlocks(&blocks, &nodes, &links, p)
 	}
@@ -164,6 +156,8 @@ func BuildTreeGraph(id, query string) (boxID string, nodes []*GraphNode, links [
 }
 
 func BuildGraph(query string) (boxID string, nodes []*GraphNode, links []*GraphLink) {
+	confGraphSnapshot := Conf.LoadGraph()
+
 	nodes = []*GraphNode{}
 	links = []*GraphLink{}
 
@@ -185,8 +179,9 @@ func BuildGraph(query string) (boxID string, nodes []*GraphNode, links []*GraphL
 	}
 	rootIDs = gulu.Str.RemoveDuplicatedElem(rootIDs)
 
-	sqlBlocks := sql.GetAllChildBlocks(rootIDs, stmt)
+	sqlBlocks := sql.GetAllChildBlocks(rootIDs, stmt, confGraphSnapshot.MaxBlocks)
 	treeBlocks := fromSQLBlocks(&sqlBlocks, "", 0)
+	treeBlocks = filterDailyNote(treeBlocks, false)
 	genTreeNodes(treeBlocks, &nodes, &links, false)
 	blocks = append(blocks, treeBlocks...)
 
@@ -206,7 +201,7 @@ func BuildGraph(query string) (boxID string, nodes []*GraphNode, links []*GraphL
 	blocks = append(blocks, forwardlinks...)
 	blocks = append(blocks, backlinks...)
 	buildLinks(&blocks, &links, false)
-	if Conf.Graph.Global.Tag {
+	if confGraphSnapshot.Global.Tag {
 		linkTagBlocks(&blocks, &nodes, &links, "")
 	}
 	markLinkedNodes(&nodes, &links, false)
@@ -216,21 +211,28 @@ func BuildGraph(query string) (boxID string, nodes []*GraphNode, links []*GraphL
 }
 
 func linkTagBlocks(blocks *[]*Block, nodes *[]*GraphNode, links *[]*GraphLink, p string) {
+	confGraphSnapshot := Conf.LoadGraph()
+
 	tagSpans := sql.QueryTagSpans(p)
 	if 1 > len(tagSpans) {
 		return
 	}
 
 	isGlobal := "" == p
-	nodeSize := Conf.Graph.Global.NodeSize
+	nodeSize := confGraphSnapshot.Global.NodeSize
 	if !isGlobal {
-		nodeSize = Conf.Graph.Local.NodeSize
+		nodeSize = confGraphSnapshot.Local.NodeSize
 	}
+	linkTagSpans(*blocks, nodes, links, tagSpans, isGlobal, nodeSize)
+}
 
+func linkTagSpans(blocks []*Block, nodes *[]*GraphNode, links *[]*GraphLink, tagSpans []*sql.Span, isGlobal bool, nodeSize float64) {
 	// 构造标签节点
 	var tagNodes []*GraphNode
+	tagNodesByContent := make(map[string]*GraphNode, len(tagSpans))
+	tagSpansByBlock := make(map[string][]*sql.Span)
 	for _, tagSpan := range tagSpans {
-		if nil == tagNodeIn(tagNodes, tagSpan.Content) {
+		if nil == tagNodesByContent[tagSpan.Content] {
 			node := &GraphNode{
 				ID:    tagSpan.Content,
 				Label: tagSpan.Content,
@@ -239,27 +241,26 @@ func linkTagBlocks(blocks *[]*Block, nodes *[]*GraphNode, links *[]*GraphLink, p
 			}
 			*nodes = append(*nodes, node)
 			tagNodes = append(tagNodes, node)
+			tagNodesByContent[tagSpan.Content] = node
 		}
+		blockID := tagSpan.BlockID
+		if isGlobal {
+			blockID = tagSpan.RootID
+		}
+		tagSpansByBlock[blockID] = append(tagSpansByBlock[blockID], tagSpan)
 	}
 
-	// 连接标签和块
-	for _, block := range *blocks {
-		for _, tagSpan := range tagSpans {
-			if isGlobal { // 全局关系图将标签链接到文档块上
-				if block.RootID == tagSpan.RootID { // 局部关系图将标签链接到子块上
-					*links = append(*links, &GraphLink{
-						From: tagSpan.Content,
-						To:   block.RootID,
-					})
-				}
-			} else {
-				if block.ID == tagSpan.BlockID { // 局部关系图将标签链接到子块上
-					*links = append(*links, &GraphLink{
-						From: tagSpan.Content,
-						To:   block.ID,
-					})
-				}
-			}
+	// 按块查找标签，保持块顺序、标签顺序和重复连线。
+	for _, block := range blocks {
+		blockID := block.ID
+		if isGlobal { // 全局关系图将标签链接到文档块上。
+			blockID = block.RootID
+		}
+		for _, tagSpan := range tagSpansByBlock[blockID] {
+			*links = append(*links, &GraphLink{
+				From: tagSpan.Content,
+				To:   blockID,
+			})
 		}
 	}
 
@@ -271,7 +272,7 @@ func linkTagBlocks(blocks *[]*Block, nodes *[]*GraphNode, links *[]*GraphLink, p
 		}
 
 		for _, targetID := range ids[:len(ids)-1] {
-			if targetTag := tagNodeIn(tagNodes, targetID); nil != targetTag {
+			if targetTag := tagNodesByContent[targetID]; nil != targetTag {
 
 				*links = append(*links, &GraphLink{
 					From: tagNode.ID,
@@ -282,50 +283,38 @@ func linkTagBlocks(blocks *[]*Block, nodes *[]*GraphNode, links *[]*GraphLink, p
 	}
 }
 
-func tagNodeIn(tagNodes []*GraphNode, content string) *GraphNode {
-	for _, tagNode := range tagNodes {
-		if tagNode.Label == content {
-			return tagNode
-		}
-	}
-	return nil
-}
-
 func growTreeGraph(forwardlinks, backlinks *[]*Block, nodes *[]*GraphNode) {
 	forwardDepth, backDepth := 0, 0
-	growLinkedNodes(forwardlinks, backlinks, nodes, nodes, &forwardDepth, &backDepth)
+	visitedIDs := graphNodeIDs(*nodes)
+	growLinkedNodes(forwardlinks, backlinks, nodes, visitedIDs, Conf.Graph.Load().Local.NodeSize, &forwardDepth, &backDepth)
 }
 
-func growLinkedNodes(forwardlinks, backlinks *[]*Block, nodes, all *[]*GraphNode, forwardDepth, backDepth *int) {
+func growLinkedNodes(forwardlinks, backlinks *[]*Block, nodes *[]*GraphNode, visitedIDs map[string]bool, nodeSize float64, forwardDepth, backDepth *int) {
 	if 1 > len(*nodes) {
 		return
 	}
+	currentIDs := graphNodeIDs(*nodes)
 
 	forwardGeneration := &[]*GraphNode{}
 	if 16 > *forwardDepth {
 		for _, ref := range *forwardlinks {
-			for _, node := range *nodes {
-				if node.ID == ref.ID {
-					var defs []*Block
-					for _, refDef := range ref.Defs {
-						if existNodes(all, refDef.ID) || existNodes(forwardGeneration, refDef.ID) || existNodes(nodes, refDef.ID) {
-							continue
-						}
-						defs = append(defs, refDef)
-					}
-
-					for _, refDef := range defs {
-						defNode := &GraphNode{
-							ID:   refDef.ID,
-							Box:  refDef.Box,
-							Path: refDef.Path,
-							Size: Conf.Graph.Local.NodeSize,
-							Type: refDef.Type,
-						}
-						nodeTitleLabel(defNode, nodeContentByBlock(refDef))
-						*forwardGeneration = append(*forwardGeneration, defNode)
-					}
+			if !currentIDs[ref.ID] {
+				continue
+			}
+			for _, refDef := range ref.Defs {
+				if visitedIDs[refDef.ID] || currentIDs[refDef.ID] {
+					continue
 				}
+				defNode := &GraphNode{
+					ID:   refDef.ID,
+					Box:  refDef.Box,
+					Path: refDef.Path,
+					Size: nodeSize,
+					Type: refDef.Type,
+				}
+				nodeTitleLabel(defNode, nodeContentByBlock(refDef))
+				*forwardGeneration = append(*forwardGeneration, defNode)
+				visitedIDs[refDef.ID] = true
 			}
 		}
 	}
@@ -333,24 +322,23 @@ func growLinkedNodes(forwardlinks, backlinks *[]*Block, nodes, all *[]*GraphNode
 	backGeneration := &[]*GraphNode{}
 	if 16 > *backDepth {
 		for _, def := range *backlinks {
-			for _, node := range *nodes {
-				if node.ID == def.ID {
-					for _, ref := range def.Refs {
-						if existNodes(all, ref.ID) || existNodes(backGeneration, ref.ID) || existNodes(nodes, ref.ID) {
-							continue
-						}
-
-						refNode := &GraphNode{
-							ID:   ref.ID,
-							Box:  ref.Box,
-							Path: ref.Path,
-							Size: Conf.Graph.Local.NodeSize,
-							Type: ref.Type,
-						}
-						nodeTitleLabel(refNode, nodeContentByBlock(ref))
-						*backGeneration = append(*backGeneration, refNode)
-					}
+			if !currentIDs[def.ID] {
+				continue
+			}
+			for _, ref := range def.Refs {
+				if visitedIDs[ref.ID] || currentIDs[ref.ID] {
+					continue
 				}
+				refNode := &GraphNode{
+					ID:   ref.ID,
+					Box:  ref.Box,
+					Path: ref.Path,
+					Size: nodeSize,
+					Type: ref.Type,
+				}
+				nodeTitleLabel(refNode, nodeContentByBlock(ref))
+				*backGeneration = append(*backGeneration, refNode)
+				visitedIDs[ref.ID] = true
 			}
 		}
 	}
@@ -360,20 +348,21 @@ func growLinkedNodes(forwardlinks, backlinks *[]*Block, nodes, all *[]*GraphNode
 	*generation = append(*generation, *backGeneration...)
 	*forwardDepth++
 	*backDepth++
-	growLinkedNodes(forwardlinks, backlinks, generation, nodes, forwardDepth, backDepth)
+	growLinkedNodes(forwardlinks, backlinks, generation, visitedIDs, nodeSize, forwardDepth, backDepth)
 	*nodes = append(*nodes, *generation...)
 }
 
-func existNodes(nodes *[]*GraphNode, id string) bool {
-	for _, node := range *nodes {
-		if node.ID == id {
-			return true
-		}
+func graphNodeIDs(nodes []*GraphNode) map[string]bool {
+	ret := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		ret[node.ID] = true
 	}
-	return false
+	return ret
 }
 
 func buildLinks(defs *[]*Block, links *[]*GraphLink, local bool) {
+	confGraphSnapshot := Conf.LoadGraph()
+
 	for _, def := range *defs {
 		for _, ref := range def.Refs {
 			link := &GraphLink{
@@ -382,11 +371,11 @@ func buildLinks(defs *[]*Block, links *[]*GraphLink, local bool) {
 				Ref:  true,
 			}
 			if local {
-				if Conf.Graph.Local.Arrow {
+				if confGraphSnapshot.Local.Arrow {
 					link.Arrows = &GraphArrows{To: &GraphArrowsTo{Enabled: true}}
 				}
 			} else {
-				if Conf.Graph.Global.Arrow {
+				if confGraphSnapshot.Global.Arrow {
 					link.Arrows = &GraphArrows{To: &GraphArrowsTo{Enabled: true}}
 				}
 			}
@@ -396,9 +385,11 @@ func buildLinks(defs *[]*Block, links *[]*GraphLink, local bool) {
 }
 
 func genTreeNodes(blocks []*Block, nodes *[]*GraphNode, links *[]*GraphLink, local bool) {
-	nodeSize := Conf.Graph.Local.NodeSize
+	confGraphSnapshot := Conf.LoadGraph()
+
+	nodeSize := confGraphSnapshot.Local.NodeSize
 	if !local {
-		nodeSize = Conf.Graph.Global.NodeSize
+		nodeSize = confGraphSnapshot.Global.NodeSize
 	}
 
 	for _, block := range blocks {
@@ -421,34 +412,38 @@ func genTreeNodes(blocks []*Block, nodes *[]*GraphNode, links *[]*GraphLink, loc
 }
 
 func markLinkedNodes(nodes *[]*GraphNode, links *[]*GraphLink, local bool) {
-	nodeSize := Conf.Graph.Local.NodeSize
-	if !local {
-		nodeSize = Conf.Graph.Global.NodeSize
-	}
+	confGraphSnapshot := Conf.LoadGraph()
 
+	nodeSize := confGraphSnapshot.Local.NodeSize
+	if !local {
+		nodeSize = confGraphSnapshot.Global.NodeSize
+	}
+	markLinkedNodesWithSize(nodes, links, nodeSize)
+}
+
+func markLinkedNodesWithSize(nodes *[]*GraphNode, links *[]*GraphLink, nodeSize float64) {
+	nodeByID := make(map[string]*GraphNode, len(*nodes))
+	for _, node := range *nodes {
+		if nodeByID[node.ID] == nil {
+			nodeByID[node.ID] = node
+		}
+	}
 	tmpLinks := (*links)[:0]
 	for _, link := range *links {
-		var sourceFound, targetFound bool
-		for _, node := range *nodes {
-			if link.To == node.ID {
-				if link.Ref {
-					size := nodeSize
-					node.Defs++
-					size = math.Log2(float64(node.Defs))*nodeSize + nodeSize
-					node.Size = size
-				}
-				targetFound = true
-			} else if link.From == node.ID {
-				node.Refs++
-				sourceFound = true
-			}
-			if targetFound && sourceFound {
-				break
-			}
+		if link.From == link.To {
+			continue
 		}
-		if sourceFound && targetFound {
-			tmpLinks = append(tmpLinks, link)
+		source, sourceFound := nodeByID[link.From]
+		target, targetFound := nodeByID[link.To]
+		if !sourceFound || !targetFound {
+			continue
 		}
+		source.Refs++
+		if link.Ref {
+			target.Defs++
+			target.Size = (math.Log2(float64(target.Defs)) + 1) * nodeSize
+		}
+		tmpLinks = append(tmpLinks, link)
 	}
 	*links = tmpLinks
 }
@@ -467,41 +462,32 @@ func removeDuplicatedUnescape(nodes []*GraphNode) (ret []*GraphNode) {
 }
 
 func pruneUnref(nodes *[]*GraphNode, links *[]*GraphLink) {
-	maxBlocks := Conf.Graph.MaxBlocks
+	confGraphSnapshot := Conf.LoadGraph()
+
+	pruneUnrefWithLimits(nodes, links, confGraphSnapshot.Global.MinRefs, confGraphSnapshot.MaxBlocks)
+}
+
+func pruneUnrefWithLimits(nodes *[]*GraphNode, links *[]*GraphLink, minRefs, maxBlocks int) {
 	tmpNodes := (*nodes)[:0]
 	for _, node := range *nodes {
-		if 0 == Conf.Graph.Global.MinRefs {
-			tmpNodes = append(tmpNodes, node)
-		} else {
-			if Conf.Graph.Global.MinRefs <= node.Refs {
-				tmpNodes = append(tmpNodes, node)
-				continue
-			}
-
-			if Conf.Graph.Global.MinRefs <= node.Defs {
-				tmpNodes = append(tmpNodes, node)
-				continue
-			}
+		if minRefs > 0 && node.Refs < minRefs && node.Defs < minRefs {
+			continue
 		}
-
-		if maxBlocks < len(tmpNodes) {
+		if maxBlocks <= len(tmpNodes) {
 			logging.LogWarnf("exceeded the maximum number of render nodes [%d]", maxBlocks)
 			break
 		}
+		tmpNodes = append(tmpNodes, node)
 	}
 	*nodes = tmpNodes
 
+	nodeIDs := make(map[string]bool, len(*nodes))
+	for _, node := range *nodes {
+		nodeIDs[node.ID] = true
+	}
 	tmpLinks := (*links)[:0]
 	for _, link := range *links {
-		var sourceFound, targetFound bool
-		for _, node := range *nodes {
-			if link.To == node.ID {
-				targetFound = true
-			} else if link.From == node.ID {
-				sourceFound = true
-			}
-		}
-		if sourceFound && targetFound {
+		if link.From != link.To && nodeIDs[link.From] && nodeIDs[link.To] {
 			tmpLinks = append(tmpLinks, link)
 		}
 	}
@@ -512,9 +498,6 @@ func nodeContentByBlock(block *Block) (ret string) {
 	if ret = block.Name; "" != ret {
 		return
 	}
-	if ret = block.Memo; "" != ret {
-		return
-	}
 	ret = block.Content
 	if maxLen := 48; maxLen < utf8.RuneCountInString(ret) {
 		ret = gulu.Str.SubStr(ret, maxLen) + "..."
@@ -523,82 +506,122 @@ func nodeContentByBlock(block *Block) (ret string) {
 }
 
 func graphTypeFilter(local bool) string {
+	confGraphSnapshot := Conf.LoadGraph()
+
 	var inList []string
 
-	paragraph := Conf.Graph.Local.Paragraph
+	paragraph := confGraphSnapshot.Local.Paragraph
 	if !local {
-		paragraph = Conf.Graph.Global.Paragraph
+		paragraph = confGraphSnapshot.Global.Paragraph
 	}
 	if paragraph {
 		inList = append(inList, "'p'")
 	}
 
-	heading := Conf.Graph.Local.Heading
+	heading := confGraphSnapshot.Local.Heading
 	if !local {
-		heading = Conf.Graph.Global.Heading
+		heading = confGraphSnapshot.Global.Heading
 	}
 	if heading {
 		inList = append(inList, "'h'")
 	}
 
-	math := Conf.Graph.Local.Math
+	math := confGraphSnapshot.Local.Math
 	if !local {
-		math = Conf.Graph.Global.Math
+		math = confGraphSnapshot.Global.Math
 	}
 	if math {
 		inList = append(inList, "'m'")
 	}
 
-	code := Conf.Graph.Local.Code
+	code := confGraphSnapshot.Local.Code
 	if !local {
-		code = Conf.Graph.Global.Code
+		code = confGraphSnapshot.Global.Code
 	}
 	if code {
 		inList = append(inList, "'c'")
 	}
 
-	table := Conf.Graph.Local.Table
+	table := confGraphSnapshot.Local.Table
 	if !local {
-		table = Conf.Graph.Global.Table
+		table = confGraphSnapshot.Global.Table
 	}
 	if table {
 		inList = append(inList, "'t'")
 	}
 
-	list := Conf.Graph.Local.List
+	list := confGraphSnapshot.Local.List
 	if !local {
-		list = Conf.Graph.Global.List
+		list = confGraphSnapshot.Global.List
 	}
 	if list {
 		inList = append(inList, "'l'")
 	}
 
-	listItem := Conf.Graph.Local.ListItem
+	listItem := confGraphSnapshot.Local.ListItem
 	if !local {
-		listItem = Conf.Graph.Global.ListItem
+		listItem = confGraphSnapshot.Global.ListItem
 	}
 	if listItem {
 		inList = append(inList, "'i'")
 	}
 
-	blockquote := Conf.Graph.Local.Blockquote
+	blockquote := confGraphSnapshot.Local.Blockquote
 	if !local {
-		blockquote = Conf.Graph.Global.Blockquote
+		blockquote = confGraphSnapshot.Global.Blockquote
 	}
 	if blockquote {
 		inList = append(inList, "'b'")
 	}
 
-	super := Conf.Graph.Local.Super
+	super := confGraphSnapshot.Local.Super
 	if !local {
-		super = Conf.Graph.Global.Super
+		super = confGraphSnapshot.Global.Super
 	}
 	if super {
 		inList = append(inList, "'s'")
 	}
 
+	callout := confGraphSnapshot.Local.Callout
+	if !local {
+		callout = confGraphSnapshot.Global.Callout
+	}
+	if callout {
+		inList = append(inList, "'callout'")
+	}
+
 	inList = append(inList, "'d'")
 	return " AND ref.type IN (" + strings.Join(inList, ",") + ")"
+}
+
+func filterDailyNote(blocks []*Block, local bool) (ret []*Block) {
+	confGraphSnapshot := Conf.LoadGraph()
+
+	// Graph dailynote filtering not working https://github.com/siyuan-note/siyuan/issues/16463
+
+	dailyNote := confGraphSnapshot.Local.DailyNote
+	if !local {
+		dailyNote = confGraphSnapshot.Global.DailyNote
+	}
+
+	if dailyNote {
+		ret = blocks
+		return
+	}
+
+	for _, block := range blocks {
+		isDailyNote := false
+		for k := range block.IAL {
+			isDailyNote = strings.HasPrefix(k, DailyNoteAttrPrefix)
+			if isDailyNote {
+				break
+			}
+		}
+		if !isDailyNote {
+			ret = append(ret, block)
+		}
+	}
+	return
 }
 
 func graphDailyNoteFilter(local bool) string {
@@ -609,15 +632,21 @@ func graphDailyNoteFilter(local bool) string {
 
 	buf := bytes.Buffer{}
 	for _, p := range dailyNotesPaths {
-		buf.WriteString(" AND ref.hpath NOT LIKE '" + p + "%'")
+		// 转义单引号，避免日记存储路径闭合 SQL 字符串字面量造成注入
+		// https://github.com/siyuan-note/siyuan/security/advisories/GHSA-xr4h-j7cg-q8pc
+		buf.WriteString(" AND ref.hpath NOT LIKE '")
+		buf.WriteString(strings.ReplaceAll(p, "'", "''"))
+		buf.WriteString("%'")
 	}
 	return buf.String()
 }
 
 func dailyNotePaths(local bool) (ret []string) {
-	dailyNote := Conf.Graph.Local.DailyNote
+	confGraphSnapshot := Conf.LoadGraph()
+
+	dailyNote := confGraphSnapshot.Local.DailyNote
 	if !local {
-		dailyNote = Conf.Graph.Global.DailyNote
+		dailyNote = confGraphSnapshot.Global.DailyNote
 	}
 
 	if dailyNote {
@@ -646,7 +675,9 @@ func nodeTitleLabel(node *GraphNode, blockContent string) {
 func query2Stmt(queryStr string) (ret string) {
 	buf := bytes.Buffer{}
 	if ast.IsNodeIDPattern(queryStr) {
-		buf.WriteString("id = '" + queryStr + "'")
+		buf.WriteString("id = '")
+		buf.WriteString(queryStr)
+		buf.WriteString("'")
 	} else {
 		var tags []string
 		luteEngine := util.NewLute()
@@ -656,6 +687,8 @@ func query2Stmt(queryStr string) (ret string) {
 				return ast.WalkContinue
 			}
 			if n.IsTextMarkType("tag") {
+				// 标签内容在构造 LIKE 条件时统一转义，避免改变查询语义。
+				// https://github.com/siyuan-note/siyuan/security/advisories/GHSA-5rwv-4j4c-f954
 				tags = append(tags, n.Text())
 			}
 			return ast.WalkContinue
@@ -670,9 +703,9 @@ func query2Stmt(queryStr string) (ret string) {
 			if "" == part {
 				continue
 			}
-			part = strings.ReplaceAll(part, "'", "''")
-			buf.WriteString("(content LIKE '%" + part + "%'")
-			buf.WriteString(Conf.Search.NAMFilter(part))
+			buf.WriteString("(content LIKE ")
+			buf.WriteString(conf.SearchLikePattern(part))
+			buf.WriteString(Conf.Search.Load().NAMFilter(part))
 			buf.WriteString(")")
 			if i < len(parts)-1 {
 				buf.WriteString(" AND ")
@@ -684,14 +717,18 @@ func query2Stmt(queryStr string) (ret string) {
 				buf.WriteString(" OR ")
 			}
 			for i, tag := range tags {
-				buf.WriteString("(content LIKE '%#" + tag + "#%')")
+				buf.WriteString("(content LIKE ")
+				buf.WriteString(conf.SearchLikePattern("#" + tag + "#"))
+				buf.WriteString(")")
 				if i < len(tags)-1 {
 					buf.WriteString(" AND ")
 				}
 			}
 			buf.WriteString(" OR ")
 			for i, tag := range tags {
-				buf.WriteString("ial LIKE '%tags=\"%" + tag + "%\"%'")
+				buf.WriteString("ial LIKE '%tags=\"%")
+				buf.WriteString(conf.EscapeSearchLikePattern(tag))
+				buf.WriteString("%\"%' ESCAPE '\\'")
 				if i < len(tags)-1 {
 					buf.WriteString(" AND ")
 				}

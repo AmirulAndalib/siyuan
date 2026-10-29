@@ -14,6 +14,7 @@
  */
 
 import { FindState } from "./pdf_find_controller.js";
+import { toggleExpandedBtn } from "./ui_utils.js";
 
 const MATCHES_COUNT_LIMIT = 1000;
 
@@ -24,9 +25,13 @@ const MATCHES_COUNT_LIMIT = 1000;
  * is done by PDFFindController.
  */
 class PDFFindBar {
-  constructor(options, eventBus, l10n) {
-    this.opened = false;
+  #mainContainer;
 
+  #resizeObserver = new ResizeObserver(this.#resizeObserverCallback.bind(this));
+
+  opened = false;
+
+  constructor(options, mainContainer, eventBus) {
     this.bar = options.bar;
     this.toggleButton = options.toggleButton;
     this.findField = options.findField;
@@ -39,7 +44,14 @@ class PDFFindBar {
     this.findPreviousButton = options.findPreviousButton;
     this.findNextButton = options.findNextButton;
     this.eventBus = eventBus;
-    this.l10n = l10n;
+    this.#mainContainer = mainContainer;
+
+    const checkedInputs = new Map([
+      [this.highlightAll, "highlightallchange"],
+      [this.caseSensitive, "casesensitivitychange"],
+      [this.entireWord, "entirewordchange"],
+      [this.matchDiacritics, "diacriticmatchingchange"],
+    ]);
 
     // Add event listeners to the DOM elements.
     this.toggleButton.addEventListener("click", () => {
@@ -50,11 +62,14 @@ class PDFFindBar {
       this.dispatchEvent("");
     });
 
-    this.bar.addEventListener("keydown", e => {
-      switch (e.keyCode) {
+    this.bar.addEventListener("keydown", ({ keyCode, shiftKey, target }) => {
+      switch (keyCode) {
         case 13: // Enter
-          if (e.target === this.findField) {
-            this.dispatchEvent("again", e.shiftKey);
+          if (target === this.findField) {
+            this.dispatchEvent("again", shiftKey);
+          } else if (checkedInputs.has(target)) {
+            target.checked = !target.checked;
+            this.dispatchEvent(/* evtName = */ checkedInputs.get(target));
           }
           break;
         case 27: // Escape
@@ -66,52 +81,16 @@ class PDFFindBar {
     this.findPreviousButton.addEventListener("click", () => {
       this.dispatchEvent("again", true);
     });
-
     this.findNextButton.addEventListener("click", () => {
       this.dispatchEvent("again", false);
     });
 
-    this.highlightAll.addEventListener("click", () => {
-      this.dispatchEvent("highlightallchange");
-      // NOTE
-      if (this.highlightAll.checked) {
-        this.highlightAll.parentElement.classList.remove("b3-button--outline")
-      } else {
-        this.highlightAll.parentElement.classList.add("b3-button--outline")
-      }
-    });
-
-    this.caseSensitive.addEventListener("click", () => {
-      this.dispatchEvent("casesensitivitychange");
-      // NOTE
-      if (this.caseSensitive.checked) {
-        this.caseSensitive.parentElement.classList.remove("b3-button--outline")
-      } else {
-        this.caseSensitive.parentElement.classList.add("b3-button--outline")
-      }
-    });
-
-    this.entireWord.addEventListener("click", () => {
-      this.dispatchEvent("entirewordchange");
-      // NOTE
-      if (this.entireWord.checked) {
-        this.entireWord.parentElement.classList.remove("b3-button--outline")
-      } else {
-        this.entireWord.parentElement.classList.add("b3-button--outline")
-      }
-    });
-
-    this.matchDiacritics.addEventListener("click", () => {
-      this.dispatchEvent("diacriticmatchingchange");
-      // NOTE
-      if (this.matchDiacritics.checked) {
-        this.matchDiacritics.parentElement.classList.remove("b3-button--outline")
-      } else {
-        this.matchDiacritics.parentElement.classList.add("b3-button--outline")
-      }
-    });
-
-    this.eventBus._on("resize", this.#adjustWidth.bind(this));
+    for (const [elem, evtName] of checkedInputs) {
+      elem.addEventListener("click", () => {
+        this.dispatchEvent(evtName);
+        elem.parentElement.classList.toggle("b3-button--outline", !elem.checked);
+      });
+    }
   }
 
   reset() {
@@ -123,7 +102,6 @@ class PDFFindBar {
       source: this,
       type,
       query: this.findField.value,
-      phraseSearch: true,
       caseSensitive: this.caseSensitive.checked,
       entireWord: this.entireWord.checked,
       highlightAll: this.highlightAll.checked,
@@ -133,9 +111,9 @@ class PDFFindBar {
   }
 
   updateUIState(state, previous, matchesCount) {
-    // NOTE
-    let findMsg = "";
-    let status = "";
+    const { findField, findMsg } = this;
+    let findMsgId = "",
+      status = "";
 
     switch (state) {
       case FindState.FOUND:
@@ -145,65 +123,83 @@ class PDFFindBar {
         break;
       case FindState.NOT_FOUND:
         // NOTE
-        findMsg = window.siyuan.languages.find_not_found
+        findMsgId = window.siyuan.languages.find_not_found
+        // findMsgId = "pdfjs-find-not-found";
         status = "notFound";
         break;
       case FindState.WRAPPED:
         // NOTE
-        findMsg = window.siyuan.languages.find_not_found[`find_reached_${previous ? 'top' : 'bottom'}`]
+        findMsgId = window.siyuan.languages.find_not_found[`find_reached_${previous ? 'top' : 'bottom'}`]
+        // findMsgId = previous
+        //   ? "pdfjs-find-reached-top"
+        //   : "pdfjs-find-reached-bottom";
         break;
     }
-    this.findField.setAttribute("data-status", status);
-    this.findField.setAttribute("aria-invalid", state === FindState.NOT_FOUND);
+    findField.setAttribute("data-status", status);
+    findField.setAttribute("aria-invalid", state === FindState.NOT_FOUND);
 
-    // NOTE
-    this.findMsg.textContent = findMsg
-    this.#adjustWidth()
+    findMsg.setAttribute("data-status", status);
+    if (findMsgId) {
+      // NOTE
+      findMsg.textContent = findMsgId;
+      // findMsg.setAttribute("data-l10n-id", findMsgId);
+    } else {
+      findMsg.removeAttribute("data-l10n-id");
+      findMsg.textContent = "";
+    }
+
     this.updateResultsCount(matchesCount);
   }
 
   updateResultsCount({ current = 0, total = 0 } = {}) {
-    const limit = MATCHES_COUNT_LIMIT;
-    // NOTE
-    let matchCountMsg = "";
+    const { findResultsCount } = this;
 
     if (total > 0) {
-      if (total > limit) {
-        matchCountMsg = window.siyuan.languages.find_match_count_limit.replace(
-          '{{limit}}', limit)
-      } else {
-        matchCountMsg = window.siyuan.languages.find_match_count.replace('{{current}}',
-          current).replace('{{total}}', total)
-      }
+      const limit = MATCHES_COUNT_LIMIT;
+      // NOTE
+      findResultsCount.textContent = total > limit ?
+          window.siyuan.languages.find_match_count_limit.replace('{{limit}}', limit) :
+          window.siyuan.languages.find_match_count.replace('{{current}}', current).replace('{{total}}', total);
+      // findResultsCount.setAttribute(
+      //   "data-l10n-id",
+      //   total > limit
+      //     ? "pdfjs-find-match-count-limit"
+      //     : "pdfjs-find-match-count"
+      // );
+      // findResultsCount.setAttribute(
+      //   "data-l10n-args",
+      //   JSON.stringify({ limit, current, total })
+      // );
+    } else {
+      findResultsCount.removeAttribute("data-l10n-id");
+      findResultsCount.textContent = "";
     }
-
-    this.findResultsCount.textContent = matchCountMsg
-    this.#adjustWidth()
   }
 
   open() {
     if (!this.opened) {
+      // Potentially update the findbar layout, row vs column, when:
+      //  - The width of the viewer itself changes.
+      //  - The width of the findbar changes, by toggling the visibility
+      //    (or localization) of find count/status messages.
+      this.#resizeObserver.observe(this.#mainContainer);
+      this.#resizeObserver.observe(this.bar);
+
       this.opened = true;
-      this.toggleButton.classList.add("toggled");
-      this.toggleButton.setAttribute("aria-expanded", "true");
-      // NOTE
-      this.bar.classList.remove("fn__hidden");
+      toggleExpandedBtn(this.toggleButton, true, this.bar);
     }
     this.findField.select();
     this.findField.focus();
-
-    this.#adjustWidth();
   }
 
   close() {
     if (!this.opened) {
       return;
     }
+    this.#resizeObserver.disconnect();
+
     this.opened = false;
-    this.toggleButton.classList.remove("toggled");
-    this.toggleButton.setAttribute("aria-expanded", "false");
-    // NOTE
-    this.bar.classList.add("fn__hidden");
+    toggleExpandedBtn(this.toggleButton, false, this.bar);
 
     this.eventBus.dispatch("findbarclose", { source: this });
   }
@@ -216,25 +212,22 @@ class PDFFindBar {
     }
   }
 
-  #adjustWidth() {
-    if (!this.opened) {
-      return;
-    }
-
+  #resizeObserverCallback() {
+    const { bar } = this;
     // The find bar has an absolute position and thus the browser extends
     // its width to the maximum possible width once the find bar does not fit
     // entirely within the window anymore (and its elements are automatically
     // wrapped). Here we detect and fix that.
-    this.bar.classList.remove("wrapContainers");
+    bar.classList.remove("wrapContainers");
 
-    const findbarHeight = this.bar.clientHeight;
-    const inputContainerHeight = this.bar.firstElementChild.clientHeight;
+    const findbarHeight = bar.clientHeight;
+    const inputContainerHeight = bar.firstElementChild.clientHeight;
 
     if (findbarHeight > inputContainerHeight) {
       // The findbar is taller than the input container, which means that
       // the browser wrapped some of the elements. For a consistent look,
       // wrap all of them to adjust the width of the find bar.
-      this.bar.classList.add("wrapContainers");
+      bar.classList.add("wrapContainers");
     }
   }
 }

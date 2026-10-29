@@ -1,26 +1,31 @@
 import {showMessage} from "../dialog/message";
-import {Dialog} from "../dialog";
-import {focusByRange} from "../protyle/util/selection";
+import {openInputDialog} from "../dialog/inputDialog";
+import {focusByRange} from "../protyle/util/selectionOffsets";
 import {hasClosestBlock} from "../protyle/util/hasClosest";
 import {removeEmbed} from "../protyle/wysiwyg/removeEmbed";
-import {isMobile} from "../util/functions";
-import {getAssetName, getDisplayName, pathPosix, setNotebookName} from "../util/pathName";
-import {fetchPost} from "../util/fetch";
+import {getAssetName, setNotebookName} from "../util/pathName";
+import {documentCreateRequest} from "../util/documentCreate";
+import {fetchPost, fetchSyncPost} from "../util/fetch";
 import {Constants} from "../constants";
 import {showTooltip} from "../dialog/tooltip";
+/// #if !MOBILE
+import {getAllModels} from "../layout/getAll";
+/// #endif
+import {getAllEditor} from "../layout/getAll";
 
-export const validateName = (name: string, targetElement?: HTMLElement) => {
-    if (/\r\n|\r|\n|\u2028|\u2029|\t|\//.test(name)) {
+export const validateName = (name: string, targetElement?: HTMLElement, documentTitle = false) => {
+    if (/\r\n|\r|\n|\u2028|\u2029|\t/.test(name)) {
         if (targetElement) {
-            showTooltip(window.siyuan.languages.fileNameRule, targetElement, true);
+            showTooltip(window.siyuan.languages.fileNameRule, targetElement, "error");
         } else {
             showMessage(window.siyuan.languages.fileNameRule);
         }
         return false;
     }
-    if (name.length > Constants.SIZE_TITLE) {
+    const length = documentTitle ? Array.from(name).length : name.length;
+    if (length > Constants.SIZE_TITLE) {
         if (targetElement) {
-            showTooltip(window.siyuan.languages["_kernel"]["106"], targetElement, true);
+            showTooltip(window.siyuan.languages["_kernel"]["106"], targetElement, "error");
         } else {
             showMessage(window.siyuan.languages["_kernel"]["106"]);
         }
@@ -30,7 +35,20 @@ export const validateName = (name: string, targetElement?: HTMLElement) => {
 };
 
 export const replaceFileName = (name: string) => {
-    return name.replace(/\r\n|\r|\n|\u2028|\u2029|\t|\//g, "").substring(0, Constants.SIZE_TITLE);
+    if (name.indexOf("/") > -1) {
+        showMessage(window.siyuan.languages.fileNameRule);
+        name = name.replace(/\//g, "／");
+    }
+    return name.replace(/\r\n|\r|\n|\u2028|\u2029|\t|/g, "").substring(0, Constants.SIZE_TITLE);
+};
+
+export const truncateDocumentTitle = (name: string) => {
+    return Array.from(name).slice(0, Constants.SIZE_TITLE).join("");
+};
+
+// 文档标题按 Unicode 字符计数，保留字面斜杠。
+export const normalizeDocumentTitle = (name: string) => {
+    return truncateDocumentTitle(name.replace(/\r\n|\r|\n|\u2028|\u2029|\t/g, ""));
 };
 
 export const replaceLocalPath = (name: string) => {
@@ -42,98 +60,88 @@ export const rename = (options: {
     notebookId: string
     name: string,
     type: "notebook" | "file"
+    empty?: boolean
     range?: Range,
 }) => {
     if (window.siyuan.config.readonly) {
         return;
     }
-    const dialog = new Dialog({
+    const initialName = options.empty ? "" : options.name;
+    const dialog = openInputDialog({
         title: window.siyuan.languages.rename,
-        content: `<div class="b3-dialog__content"><input class="b3-text-field fn__block" value=""></div>
-<div class="b3-dialog__action">
-    <button class="b3-button b3-button--cancel">${window.siyuan.languages.cancel}</button><div class="fn__space"></div>
-    <button class="b3-button b3-button--text">${window.siyuan.languages.confirm}</button>
-</div>`,
-        width: isMobile() ? "92vw" : "520px",
+        value: initialName,
         destroyCallback() {
             if (options.range) {
                 focusByRange(options.range);
             }
-        }
+        },
+        onConfirm: (value, dialog) => {
+            if (!validateName(value, undefined, options.type === "file")) {
+                return;
+            }
+            let name = value.trim();
+            if (name === initialName) {
+                dialog.destroy();
+                return;
+            }
+            name = options.type === "notebook" ? replaceFileName(name) : normalizeDocumentTitle(name);
+            if (options.type === "notebook") {
+                if (!name) {
+                    name = window.siyuan.languages.untitled;
+                }
+                fetchPost("/api/notebook/renameNotebook", {
+                    notebook: options.notebookId,
+                    name,
+                }, () => {
+                    setNotebookName(options.notebookId, name);
+                });
+            } else {
+                fetchPost("/api/filetree/renameDoc", {
+                    notebook: options.notebookId,
+                    path: options.path,
+                    title: name,
+                });
+            }
+            dialog.destroy();
+        },
     });
     dialog.element.setAttribute("data-key", Constants.DIALOG_RENAME);
-    const inputElement = dialog.element.querySelector("input") as HTMLInputElement;
-    const btnsElement = dialog.element.querySelectorAll(".b3-button");
-    dialog.bindInput(inputElement, () => {
-        (btnsElement[1] as HTMLButtonElement).click();
-    });
-    inputElement.value = Lute.UnEscapeHTMLStr(options.name);
-    inputElement.focus();
-    inputElement.select();
-    btnsElement[0].addEventListener("click", () => {
-        dialog.destroy();
-    });
-    btnsElement[1].addEventListener("click", () => {
-        if (!validateName(inputElement.value)) {
-            return false;
-        }
-        if (inputElement.value === options.name) {
-            dialog.destroy();
-            return false;
-        }
-        if (inputElement.value.trim() === "") {
-            inputElement.value = "Untitled";
-        } else {
-            inputElement.value = replaceFileName(inputElement.value);
-        }
-        if (options.type === "notebook") {
-            fetchPost("/api/notebook/renameNotebook", {
-                notebook: options.notebookId,
-                name: inputElement.value
-            }, () => {
-                setNotebookName(options.notebookId, inputElement.value);
-            });
-        } else {
-            fetchPost("/api/filetree/renameDoc", {
-                notebook: options.notebookId,
-                path: options.path,
-                title: inputElement.value,
-            });
-        }
-        dialog.destroy();
-    });
 };
 
 export const renameAsset = (assetPath: string) => {
-    const dialog = new Dialog({
+    const oldName = getAssetName(assetPath);
+    const dialog = openInputDialog({
         title: window.siyuan.languages.rename,
-        content: `<div class="b3-dialog__content"><input class="b3-text-field fn__block" value=""></div>
-<div class="b3-dialog__action">
-    <button class="b3-button b3-button--cancel">${window.siyuan.languages.cancel}</button><div class="fn__space"></div>
-    <button class="b3-button b3-button--text">${window.siyuan.languages.confirm}</button>
-</div>`,
-        width: isMobile() ? "92vw" : "520px",
+        value: oldName,
+        description: window.siyuan.languages.renameAssetTip,
+        onConfirm: async (value, dialog) => {
+            if (value === oldName || !value) {
+                dialog.destroy();
+                return;
+            }
+
+            if (await renameAssetFile(assetPath, value)) {
+                dialog.destroy();
+            }
+        },
     });
     dialog.element.setAttribute("data-key", Constants.DIALOG_RENAMEASSETS);
-    const inputElement = dialog.element.querySelector("input") as HTMLInputElement;
-    const btnsElement = dialog.element.querySelectorAll(".b3-button");
-    dialog.bindInput(inputElement, () => {
-        (btnsElement[1] as HTMLButtonElement).click();
-    });
-    const oldName = getAssetName(assetPath);
-    inputElement.value = oldName;
-    inputElement.focus();
-    inputElement.select();
-    btnsElement[0].addEventListener("click", () => {
-        dialog.destroy();
-    });
-    btnsElement[1].addEventListener("click", () => {
-        if (inputElement.value === oldName || !inputElement.value) {
-            dialog.destroy();
-            return false;
+};
+
+export const renameAssetFile = async (assetPath: string, newName: string): Promise<string | undefined> => {
+    const response = await fetchSyncPost("/api/asset/renameAsset", {oldPath: assetPath, newName});
+    if (response.code !== 0) {
+        return;
+    }
+    /// #if !MOBILE
+    getAllModels().asset.forEach(item => {
+        if (item.path === assetPath) {
+            item.update(response.data.newPath);
         }
-        fetchPost("/api/asset/renameAsset", {oldPath: assetPath, newName: inputElement.value});
     });
+    /// #endif
+    getAllEditor().forEach(item => item.reload(false));
+    return response.data.newPath;
 };
 
 export const newFileContentBySelect = (protyle: IProtyle) => {
@@ -167,11 +175,7 @@ export const newFileContentBySelect = (protyle: IProtyle) => {
     if (fileNameShort.length > 10) {
         fileNameShort = fileNameShort.substr(0, 10) + "...";
     }
-    fileNameShort = replaceFileName(fileNameShort);
-    fetchPost("/api/filetree/createDoc", {
-        notebook: protyle.notebookId,
-        path: pathPosix().join(getDisplayName(protyle.path, false, true), Lute.NewNodeID() + ".sy"),
-        title: fileNameShort,
-        md: protyle.lute.BlockDOM2StdMd(html)
-    });
+    fileNameShort = normalizeDocumentTitle(fileNameShort);
+    fetchPost("/api/filetree/createDocByParent", documentCreateRequest(protyle.notebookId, protyle.path,
+        Lute.NewNodeID(), fileNameShort, protyle.lute.BlockDOM2StdMd(html)));
 };

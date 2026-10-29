@@ -1,9 +1,9 @@
 const path = require("path");
+const PreserveWatchAssetsPlugin = require("./scripts/preserve-watch-assets");
 const webpack = require("webpack");
 const pkg = require("./package.json");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
-const {CleanWebpackPlugin} = require("clean-webpack-plugin");
 // const BundleAnalyzerPlugin = require("webpack-bundle-analyzer").BundleAnalyzerPlugin;
 const {EsbuildPlugin} = require("esbuild-loader");
 
@@ -11,8 +11,10 @@ module.exports = (env, argv) => {
     return {
         mode: argv.mode || "development",
         watch: argv.mode !== "production",
-        devtool: argv.mode !== "production" ? "eval" : false,
+        devtool: argv.mode !== "production" ? "eval-source-map" : false,
         output: {
+            // 首次输出时清理，开发期间的后续输出由插件保留旧资源。
+            clean: true,
             publicPath: "/stage/build/desktop/",
             filename: "[name].[chunkhash].js",
             path: path.resolve(__dirname, "stage/build/desktop"),
@@ -23,7 +25,10 @@ module.exports = (env, argv) => {
         optimization: {
             minimize: true,
             minimizer: [
-                new EsbuildPlugin({target: "es6"}),
+                new EsbuildPlugin({
+                    target: "es6",
+                    sourcemap: argv.mode !== "production",
+                }),
             ],
         },
         resolve: {
@@ -51,6 +56,10 @@ module.exports = (env, argv) => {
                             loader: "esbuild-loader",
                             options: {
                                 target: "es6",
+                                supported: {
+                                    "import-meta": true,
+                                },
+                                sourcemap: argv.mode !== "production",
                             }
                         },
                         {
@@ -72,21 +81,25 @@ module.exports = (env, argv) => {
                         MiniCssExtractPlugin.loader,
                         {
                             loader: "css-loader", // translates CSS into CommonJS
+                            options: {
+                                sourceMap: argv.mode !== "production",
+                            },
                         },
                         {
                             loader: "sass-loader", // compiles Sass to CSS
+                            options: {
+                                sourceMap: argv.mode !== "production",
+                            },
                         },
                     ],
                 },
                 {
-                    test: /\.woff$/,
-                    type: "asset/resource",
-                    generator: {
-                        filename: "../fonts/JetBrainsMono-Regular.woff",
-                    },
+                    test: /task-(canceled|in-progress|unchecked)\.svg$/,
+                    type: "asset/inline",
                 },
                 {
                     test: /\.(png|svg)$/,
+                    exclude: /task-(canceled|in-progress|unchecked)\.svg$/,
                     use: [
                         {
                             loader: "file-loader",
@@ -100,12 +113,8 @@ module.exports = (env, argv) => {
             ],
         },
         plugins: [
+            new PreserveWatchAssetsPlugin(),
             // new BundleAnalyzerPlugin(),
-            new CleanWebpackPlugin({
-                cleanStaleWebpackAssets: false,
-                cleanOnceBeforeBuildPatterns: [
-                    path.join(__dirname, "stage/build/desktop")],
-            }),
             new webpack.DefinePlugin({
                 SIYUAN_VERSION: JSON.stringify(pkg.version),
                 NODE_ENV: JSON.stringify(argv.mode),

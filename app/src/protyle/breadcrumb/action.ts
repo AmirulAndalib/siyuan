@@ -1,14 +1,15 @@
 /// #if !MOBILE
-import {getAllModels} from "../../layout/getAll";
+import {getAllModels, getAllWnds} from "../../layout/getAll";
 /// #endif
 import {addLoading} from "../ui/initUI";
 import {fetchPost} from "../../util/fetch";
 import {Constants} from "../../constants";
 import {hideAllElements, hideElements} from "../ui/hideElements";
 import {hasClosestByClassName} from "../util/hasClosest";
-import {reloadProtyle} from "../util/reload";
 import {resize} from "../util/resize";
 import {disabledProtyle, enableProtyle} from "../util/onGet";
+import {isWindow} from "../../util/functions";
+import {Wnd} from "../../layout/Wnd";
 
 export const net2LocalAssets = (protyle: IProtyle, type: "Assets" | "Img") => {
     if (protyle.element.querySelector(".wysiwygLoading")) {
@@ -18,42 +19,62 @@ export const net2LocalAssets = (protyle: IProtyle, type: "Assets" | "Img") => {
     hideElements(["toolbar"], protyle);
     fetchPost(`/api/format/net${type}2LocalAssets`, {
         id: protyle.block.rootID
-    }, () => {
-        /// #if MOBILE
-        reloadProtyle(protyle, false);
-        /// #else
-        getAllModels().editor.forEach(item => {
-            if (item.editor.protyle.block.rootID === protyle.block.rootID) {
-                reloadProtyle(item.editor.protyle, item.editor.protyle.element.isSameNode(protyle.element));
-            }
-        });
-        /// #endif
     });
 };
 
-export const fullscreen = (element: Element, btnElement?: Element) => {
+export const setFullscreen = (element: Element, enter: boolean, btnElement?: Element) => {
+    if (element.classList.contains("fullscreen") === enter) {
+        return false;
+    }
     setTimeout(() => {
         hideAllElements(["gutter"]);
     }, Constants.TIMEOUT_TRANSITION);   // 等待页面动画结束
 
-    const isFullscreen = element.className.includes("fullscreen");
-    if (isFullscreen) {
-        element.classList.remove("fullscreen");
-        document.getElementById("drag")?.classList.remove("fn__hidden");
-    } else {
+    if (enter) {
         element.classList.add("fullscreen");
         document.getElementById("drag")?.classList.add("fn__hidden");
+    } else {
+        element.classList.remove("fullscreen");
+        document.getElementById("drag")?.classList.remove("fn__hidden");
     }
+    /// #if !MOBILE
+    const isWindowMode = isWindow();
+    const wndsTemp: Wnd[] = [];
+    if (isWindowMode) {
+        getAllWnds(window.siyuan.layout.layout, wndsTemp);
+    } else if (window.siyuan.config.appearance.hideToolbar) {
+        getAllWnds(window.siyuan.layout.centerLayout, wndsTemp);
+    }
+    wndsTemp.find(item => {
+        const headerElement = item.headersElement.parentElement;
+        if (headerElement.getBoundingClientRect().top <= 0) {
+            ((headerElement.querySelector(".item--readonly .fn__flex-1") as HTMLElement).style as CSSStyleDeclarationElectron).WebkitAppRegion =
+                enter ? "" : "drag";
+            return true;
+        }
+    });
+    /// #endif
 
-    if (btnElement) {
-        if (isFullscreen) {
-            btnElement.querySelector("use").setAttribute("xlink:href", "#iconFullscreen");
+    /// #if !MOBILE
+    if ("darwin" !== window.siyuan.config.system.os && !isWindow()) {
+        const windowControlsElement = document.getElementById("windowControls");
+        if (enter) {
+            window.siyuan.zIndex++;
+            windowControlsElement.style.zIndex = window.siyuan.zIndex.toString();
         } else {
+            windowControlsElement.style.zIndex = "";
+        }
+    }
+    /// #endif
+    if (btnElement) {
+        if (enter) {
             btnElement.querySelector("use").setAttribute("xlink:href", "#iconFullscreenExit");
+        } else {
+            btnElement.querySelector("use").setAttribute("xlink:href", "#iconFullscreen");
         }
         const dockLayoutElement = hasClosestByClassName(element, "layout--float");
         if (dockLayoutElement) {
-            if (isFullscreen) {
+            if (enter) {
                 dockLayoutElement.setAttribute("data-temp", dockLayoutElement.style.transform);
                 dockLayoutElement.style.transform = "none";
             } else {
@@ -61,30 +82,28 @@ export const fullscreen = (element: Element, btnElement?: Element) => {
                 dockLayoutElement.removeAttribute("data-temp");
             }
         }
-        return;
+        return true;
     }
     /// #if !MOBILE
     if (element.classList.contains("protyle")) {
-        window.siyuan.editorIsFullscreen = !isFullscreen;
+        window.siyuan.editorIsFullscreen = enter;
     }
     getAllModels().editor.forEach(item => {
-        if (!element.isSameNode(item.element)) {
-            if (window.siyuan.editorIsFullscreen) {
-                if (item.element.classList.contains("fullscreen")) {
-                    item.element.classList.remove("fullscreen");
-                    resize(item.editor.protyle);
-                }
-            } else if (item.element.classList.contains("fullscreen")) {
-                item.element.classList.remove("fullscreen");
-                resize(item.editor.protyle);
-            }
+        if (element !== item.element && item.element.classList.contains("fullscreen")) {
+            item.element.classList.remove("fullscreen");
+            resize(item.editor.protyle);
         }
     });
     /// #endif
+    return true;
+};
+
+export const fullscreen = (element: Element, btnElement?: Element) => {
+    setFullscreen(element, !element.classList.contains("fullscreen"), btnElement);
 };
 
 export const updateReadonly = (target: Element, protyle: IProtyle) => {
-    if (!window.siyuan.config.readonly) {
+    if (!window.siyuan.config.readonly && protyle.element.getAttribute("disabled-forever") !== "true") {
         const isReadonly = target.querySelector("use").getAttribute("xlink:href") !== "#iconUnlock";
         if (window.siyuan.config.editor.readOnly) {
             if (isReadonly) {

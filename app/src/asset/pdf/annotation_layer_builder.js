@@ -15,162 +15,236 @@
 
 /** @typedef {import("../src/display/api").PDFPageProxy} PDFPageProxy */
 // eslint-disable-next-line max-len
-/** @typedef {import("../src/display/display_utils").PageViewport} PageViewport */
-/** @typedef {import("./interfaces").IDownloadManager} IDownloadManager */
-/** @typedef {import("./interfaces").IL10n} IL10n */
-/** @typedef {import("./interfaces").IPDFLinkService} IPDFLinkService */
+/** @typedef {import("../src/display/page_viewport").PageViewport} PageViewport */
 // eslint-disable-next-line max-len
-/** @typedef {import("./textaccessibility.js").TextAccessibilityManager} TextAccessibilityManager */
+/** @typedef {import("../src/display/annotation_storage").AnnotationStorage} AnnotationStorage */
+// eslint-disable-next-line max-len
+/** @typedef {import("./struct_tree_layer_builder.js").StructTreeLayerBuilder} StructTreeLayerBuilder */
+// eslint-disable-next-line max-len
+/** @typedef {import("./text_accessibility.js").TextAccessibilityManager} TextAccessibilityManager */
+// eslint-disable-next-line max-len
+/** @typedef {import("../src/display/editor/tools.js").AnnotationEditorUIManager} AnnotationEditorUIManager */
+/** @typedef {import("./comment_manager.js").CommentManager} CommentManager */
+/** @typedef {import("./pdf_link_service.js").PDFLinkService} PDFLinkService */
+// eslint-disable-next-line max-len
+/** @typedef {import("./base_download_manager.js").BaseDownloadManager} BaseDownloadManager */
 
-import { AnnotationLayer } from "./pdfjs";
-import { NullL10n } from "./l10n_utils.js";
+import {
+  AnnotationLayer,
+  AnnotationType,
+  setLayerDimensions,
+  Util,
+} from "./pdfjs";
+import { internalOpt } from "./internal_evt.js";
 import { PresentationModeState } from "./ui_utils.js";
 
 /**
- * @typedef {Object} AnnotationLayerBuilderOptions
- * @property {HTMLDivElement} pageDiv
+ * @typedef {object} AnnotationLayerBuilderOptions
  * @property {PDFPageProxy} pdfPage
  * @property {AnnotationStorage} [annotationStorage]
  * @property {string} [imageResourcesPath] - Path for image resources, mainly
  *   for annotation icons. Include trailing slash.
  * @property {boolean} renderForms
- * @property {IPDFLinkService} linkService
- * @property {IDownloadManager} downloadManager
- * @property {IL10n} l10n - Localization service.
+ * @property {PDFLinkService} linkService
+ * @property {BaseDownloadManager} [downloadManager]
+ * @property {boolean} [enableComment]
  * @property {boolean} [enableScripting]
  * @property {Promise<boolean>} [hasJSActionsPromise]
- * @property {Promise<Object<string, Array<Object>> | null>}
+ * @property {Promise<Record<string, Array<object>> | null>}
  *   [fieldObjectsPromise]
  * @property {Map<string, HTMLCanvasElement>} [annotationCanvasMap]
  * @property {TextAccessibilityManager} [accessibilityManager]
+ * @property {AnnotationEditorUIManager} [annotationEditorUIManager]
+ * @property {Function} [onAppend]
+ * @property {CommentManager} [commentManager]
+ */
+
+/**
+ * @typedef {object} AnnotationLayerBuilderRenderOptions
+ * @property {PageViewport} viewport
+ * @property {string} [intent] - The default value is "display".
+ * @property {StructTreeLayerBuilder} [structTreeLayer]
+ * @property {Promise} [optionalContentConfigPromise]
  */
 
 class AnnotationLayerBuilder {
-  #numAnnotations = 0;
+  #annotations = null;
 
-  #onPresentationModeChanged = null;
+  #commentManager = null;
+
+  #onAppend = null;
+
+  #eventAC = null;
+
+  #linksInjected = false;
 
   /**
    * @param {AnnotationLayerBuilderOptions} options
    */
   constructor({
-    pageDiv,
     pdfPage,
     linkService,
     downloadManager,
     annotationStorage = null,
     imageResourcesPath = "",
     renderForms = true,
-    l10n = NullL10n,
+    enableComment = false,
+    commentManager = null,
     enableScripting = false,
     hasJSActionsPromise = null,
     fieldObjectsPromise = null,
     annotationCanvasMap = null,
     accessibilityManager = null,
+    annotationEditorUIManager = null,
+    onAppend = null,
   }) {
-    this.pageDiv = pageDiv;
     this.pdfPage = pdfPage;
     this.linkService = linkService;
     this.downloadManager = downloadManager;
     this.imageResourcesPath = imageResourcesPath;
     this.renderForms = renderForms;
-    this.l10n = l10n;
     this.annotationStorage = annotationStorage;
+    this.enableComment = enableComment;
+    this.#commentManager = commentManager;
     this.enableScripting = enableScripting;
     this._hasJSActionsPromise = hasJSActionsPromise || Promise.resolve(false);
     this._fieldObjectsPromise = fieldObjectsPromise || Promise.resolve(null);
     this._annotationCanvasMap = annotationCanvasMap;
     this._accessibilityManager = accessibilityManager;
+    this._annotationEditorUIManager = annotationEditorUIManager;
+    this.#onAppend = onAppend;
 
+    this.annotationLayer = null;
     this.div = null;
     this._cancelled = false;
     this._eventBus = linkService.eventBus;
   }
 
   /**
-   * @param {PageViewport} viewport
-   * @param {string} intent (default value is 'display')
+   * @param {AnnotationLayerBuilderRenderOptions} options
    * @returns {Promise<void>} A promise that is resolved when rendering of the
    *   annotations is complete.
    */
-  async render(viewport, intent = "display") {
+  async render({
+    viewport,
+    intent = "display",
+    structTreeLayer = null,
+    optionalContentConfigPromise = null,
+  }) {
     if (this.div) {
-      if (this._cancelled || this.#numAnnotations === 0) {
+      const optionalContentConfig = await optionalContentConfigPromise;
+
+      if (this._cancelled || !this.annotationLayer) {
         return;
       }
       // If an annotationLayer already exists, refresh its children's
       // transformation matrices.
-      AnnotationLayer.update({
+      this.annotationLayer.update({
         viewport: viewport.clone({ dontFlip: true }),
-        div: this.div,
-        annotationCanvasMap: this._annotationCanvasMap,
+        optionalContentConfig,
       });
       return;
     }
 
-    const [annotations, hasJSActions, fieldObjects] = await Promise.all([
-      this.pdfPage.getAnnotations({ intent }),
-      this._hasJSActionsPromise,
-      this._fieldObjectsPromise,
-    ]);
+    const [annotations, hasJSActions, fieldObjects, optionalContentConfig] =
+      await Promise.all([
+        this.pdfPage.getAnnotations({ intent }),
+        this._hasJSActionsPromise,
+        this._fieldObjectsPromise,
+        optionalContentConfigPromise,
+      ]);
     if (this._cancelled) {
       return;
     }
-    this.#numAnnotations = annotations.length;
 
     // Create an annotation layer div and render the annotations
     // if there is at least one annotation.
-    this.div = document.createElement("div");
-    this.div.className = "annotationLayer";
-    this.pageDiv.append(this.div);
+    const div = (this.div = document.createElement("div"));
+    div.className = "annotationLayer";
+    this.#onAppend?.(div);
+    this.#initAnnotationLayer(viewport, structTreeLayer);
 
-    if (this.#numAnnotations === 0) {
-      this.hide();
+    if (annotations.length === 0) {
+      this.#annotations = annotations;
+      setLayerDimensions(this.div, viewport);
       return;
     }
-    AnnotationLayer.render({
-      viewport: viewport.clone({ dontFlip: true }),
-      div: this.div,
+
+    await this.annotationLayer.render({
       annotations,
-      page: this.pdfPage,
       imageResourcesPath: this.imageResourcesPath,
       renderForms: this.renderForms,
-      linkService: this.linkService,
       downloadManager: this.downloadManager,
-      annotationStorage: this.annotationStorage,
+      enableComment: this.enableComment,
       enableScripting: this.enableScripting,
       hasJSActions,
       fieldObjects,
-      annotationCanvasMap: this._annotationCanvasMap,
-      accessibilityManager: this._accessibilityManager,
+      optionalContentConfig,
     });
-    // NOTE this.l10n.translate(this.div);
+
+    this.#annotations = annotations;
+    this.#updateFormAppearance();
 
     // Ensure that interactive form elements in the annotationLayer are
     // disabled while PresentationMode is active (see issue 12232).
     if (this.linkService.isInPresentationMode) {
       this.#updatePresentationModeState(PresentationModeState.FULLSCREEN);
     }
-    if (!this.#onPresentationModeChanged) {
-      this.#onPresentationModeChanged = evt => {
-        this.#updatePresentationModeState(evt.state);
-      };
-      this._eventBus?._on(
+    if (!this.#eventAC) {
+      this.#eventAC = new AbortController();
+      div.addEventListener("change", () => this.#updateFormAppearance(), {
+        signal: this.#eventAC.signal,
+      });
+
+      this._eventBus?.on(
         "presentationmodechanged",
-        this.#onPresentationModeChanged
+        evt => {
+          this.#updatePresentationModeState(evt.state);
+        },
+        { signal: this.#eventAC.signal, ...internalOpt }
       );
     }
+  }
+
+  #initAnnotationLayer(viewport, structTreeLayer) {
+    this.annotationLayer = new AnnotationLayer({
+      div: this.div,
+      accessibilityManager: this._accessibilityManager,
+      annotationCanvasMap: this._annotationCanvasMap,
+      annotationEditorUIManager: this._annotationEditorUIManager,
+      annotationStorage: this.annotationStorage,
+      page: this.pdfPage,
+      viewport: viewport.clone({ dontFlip: true }),
+      structTreeLayer,
+      commentManager: this.#commentManager,
+      linkService: this.linkService,
+    });
   }
 
   cancel() {
     this._cancelled = true;
 
-    if (this.#onPresentationModeChanged) {
-      this._eventBus?._off(
-        "presentationmodechanged",
-        this.#onPresentationModeChanged
-      );
-      this.#onPresentationModeChanged = null;
+    this.#eventAC?.abort();
+    this.#eventAC = null;
+    this.annotationLayer?.destroy();
+  }
+
+  refreshCanvases() {
+    this.annotationLayer?.refreshCanvases();
+    this.#updateFormAppearance();
+  }
+
+  #updateFormAppearance() {
+    // 用显式状态适配上游表单画布，避免依赖 :has() 选择器。
+    for (const section of this.div?.querySelectorAll("section") || []) {
+      section.toggleAttribute("data-pdf-overlay", !!section.querySelector("div.annotationContent"));
+      const input = section.querySelector('input[type="checkbox"], input[type="radio"]');
+      if (!input) {
+        continue;
+      }
+      section.dataset.pdfChecked = String(input.checked);
+      section.toggleAttribute("data-pdf-checked-canvas", !!section.querySelector('[data-canvas-name="checked"]'));
+      section.toggleAttribute("data-pdf-unchecked-canvas", !!section.querySelector('[data-canvas-name="unchecked"]'));
     }
   }
 
@@ -179,6 +253,37 @@ class AnnotationLayerBuilder {
       return;
     }
     this.div.hidden = true;
+  }
+
+  hasEditableAnnotations() {
+    return !!this.annotationLayer?.hasEditableAnnotations();
+  }
+
+  /**
+   * @param {Array<object>} inferredLinks
+   * @returns {Promise<void>} A promise that is resolved when the inferred links
+   *   are added to the annotation layer.
+   */
+  async injectLinkAnnotations(inferredLinks) {
+    if (this.#annotations === null) {
+      throw new Error(
+        "`render` method must be called before `injectLinkAnnotations`."
+      );
+    }
+    if (this._cancelled || this.#linksInjected) {
+      return;
+    }
+    this.#linksInjected = true;
+
+    const newLinks = this.#annotations.length
+      ? this.#checkInferredLinks(inferredLinks)
+      : inferredLinks;
+
+    if (!newLinks.length) {
+      return;
+    }
+
+    await this.annotationLayer.addLinkAnnotations(newLinks);
   }
 
   #updatePresentationModeState(state) {
@@ -197,11 +302,80 @@ class AnnotationLayerBuilder {
         return;
     }
     for (const section of this.div.childNodes) {
-      if (section.hasAttribute("data-internal-link")) {
+      if (
+        section.hasAttribute("data-internal-link") ||
+        section.classList.contains("mediaAnnotation")
+      ) {
         continue;
       }
-      section.inert = disableFormElements;
+      section.toggleAttribute("inert", disableFormElements);
     }
+  }
+
+  #checkInferredLinks(inferredLinks) {
+    function annotationRects(annot) {
+      if (!annot.quadPoints) {
+        return [annot.rect];
+      }
+      const rects = [];
+      for (let i = 2, ii = annot.quadPoints.length; i < ii; i += 8) {
+        const trX = annot.quadPoints[i];
+        const trY = annot.quadPoints[i + 1];
+        const blX = annot.quadPoints[i + 2];
+        const blY = annot.quadPoints[i + 3];
+        rects.push([blX, blY, trX, trY]);
+      }
+      return rects;
+    }
+
+    function intersectAnnotations(annot1, annot2) {
+      const intersections = [];
+      const annot1Rects = annotationRects(annot1);
+      const annot2Rects = annotationRects(annot2);
+      for (const rect1 of annot1Rects) {
+        for (const rect2 of annot2Rects) {
+          const intersection = Util.intersect(rect1, rect2);
+          if (intersection) {
+            intersections.push(intersection);
+          }
+        }
+      }
+      return intersections;
+    }
+
+    function areaRects(rects) {
+      let totalArea = 0;
+      for (const rect of rects) {
+        totalArea += Math.abs((rect[2] - rect[0]) * (rect[3] - rect[1]));
+      }
+      return totalArea;
+    }
+
+    return inferredLinks.filter(link => {
+      let linkAreaRects;
+
+      for (const annotation of this.#annotations) {
+        if (annotation.annotationType !== AnnotationType.LINK) {
+          continue;
+        }
+        // TODO: Add a test case to verify that we can find the intersection
+        //       between two annotations with quadPoints properly.
+        const intersections = intersectAnnotations(annotation, link);
+
+        if (intersections.length === 0) {
+          continue;
+        }
+        linkAreaRects ??= areaRects(annotationRects(link));
+
+        if (
+          areaRects(intersections) / linkAreaRects >
+          0.5 /* If the overlap is more than 50%. */
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
   }
 }
 

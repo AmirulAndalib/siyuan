@@ -1,24 +1,13 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //go:build !darwin
 
 package model
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -26,81 +15,29 @@ import (
 	"github.com/88250/gulu"
 	"github.com/fsnotify/fsnotify"
 	"github.com/siyuan-note/logging"
-	"github.com/siyuan-note/siyuan/kernel/cache"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
 var assetsWatcher *fsnotify.Watcher
 
 func WatchAssets() {
-	if util.ContainerAndroid == util.Container || util.ContainerIOS == util.Container {
+	if util.IsMobileContainer() {
 		return
 	}
 
-	go func() {
-		watchAssets()
-	}()
+	go watchAssets()
 }
 
 func watchAssets() {
+	CloseWatchAssets()
 	assetsDir := filepath.Join(util.DataDir, "assets")
-	if nil != assetsWatcher {
-		assetsWatcher.Close()
-	}
 
 	var err error
-	if assetsWatcher, err = fsnotify.NewWatcher(); nil != err {
+	assetsWatcher, err = fsnotify.NewWatcher()
+	if err != nil {
 		logging.LogErrorf("add assets watcher for folder [%s] failed: %s", assetsDir, err)
 		return
 	}
-
-	go func() {
-		defer logging.Recover()
-
-		var (
-			timer     *time.Timer
-			lastEvent fsnotify.Event
-		)
-		timer = time.NewTimer(100 * time.Millisecond)
-		<-timer.C // timer should be expired at first
-
-		for {
-			select {
-			case event, ok := <-assetsWatcher.Events:
-				if !ok {
-					return
-				}
-
-				lastEvent = event
-				timer.Reset(time.Millisecond * 100)
-
-				if lastEvent.Op&fsnotify.Rename == fsnotify.Rename || lastEvent.Op&fsnotify.Write == fsnotify.Write {
-					IndexAssetContent(lastEvent.Name)
-				} else if lastEvent.Op&fsnotify.Remove == fsnotify.Remove {
-					RemoveIndexAssetContent(lastEvent.Name)
-				}
-			case err, ok := <-assetsWatcher.Errors:
-				if !ok {
-					return
-				}
-				logging.LogErrorf("watch assets failed: %s", err)
-			case <-timer.C:
-				//logging.LogInfof("assets changed: %s", lastEvent)
-				if lastEvent.Op&fsnotify.Write == fsnotify.Write {
-					IncSync()
-				}
-
-				// 重新缓存资源文件，以便使用 /资源 搜索
-				go cache.LoadAssets()
-
-				if lastEvent.Op&fsnotify.Remove == fsnotify.Remove {
-					RemoveIndexAssetContent(lastEvent.Name)
-				} else {
-					IndexAssetContent(lastEvent.Name)
-				}
-			}
-		}
-	}()
 
 	if !gulu.File.IsDir(assetsDir) {
 		os.MkdirAll(assetsDir, 0755)
@@ -108,12 +45,105 @@ func watchAssets() {
 
 	if err = assetsWatcher.Add(assetsDir); err != nil {
 		logging.LogErrorf("add assets watcher for folder [%s] failed: %s", assetsDir, err)
+		CloseWatchAssets()
+		return
 	}
-	//logging.LogInfof("added file watcher [%s]", assetsDir)
+
+	recovery := newAssetWatchRecovery(assetsWatcher, assetsDir)
+	go watchAssetEvents(assetsWatcher, recovery)
+}
+
+func (batch assetWatchBatch) addFSNotifyEvent(event fsnotify.Event) {
+	const changes = fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename
+	if event.Op&(changes|fsnotify.Chmod) != 0 {
+		batch.add(event.Name, event.Op&changes != 0)
+	}
+}
+
+func watchAssetEvents(watcher *fsnotify.Watcher, recovery *assetWatchRecovery) {
+	defer logging.Recover()
+	processAssetWatchEventsWithRecovery(watcher.Events, watcher.Errors, func(batch assetWatchBatch) {
+		recovery.remember(batch)
+		batch.flush()
+	}, recovery.recover)
+}
+
+func processAssetWatchEvents(events <-chan fsnotify.Event, errors <-chan error, flush func(assetWatchBatch)) {
+	processAssetWatchEventsWithRecovery(events, errors, flush, nil)
+}
+
+func processAssetWatchEventsWithRecovery(events <-chan fsnotify.Event, watchErrors <-chan error, flush func(assetWatchBatch), recoverWatch func(bool) (assetWatchBatch, error)) {
+	timer := time.NewTimer(100 * time.Millisecond)
+	timer.Stop()
+	defer timer.Stop()
+	deadline := time.NewTimer(time.Second)
+	deadline.Stop()
+	defer deadline.Stop()
+	batch := assetWatchBatch{}
+	var recoveryTicks <-chan time.Time
+	if recoverWatch != nil {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		recoveryTicks = ticker.C
+	}
+	flushBatch := func() {
+		timer.Stop()
+		deadline.Stop()
+		flush(batch)
+		batch = assetWatchBatch{}
+	}
+	recoverBatch := func(overflow bool) {
+		recovered, err := recoverWatch(overflow)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				logging.LogErrorf("recover assets watcher failed: %s", err)
+			}
+			return
+		}
+		if recovered == nil {
+			return
+		}
+		for name, changed := range recovered {
+			batch.add(name, changed)
+		}
+		flushBatch()
+	}
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			empty := len(batch) == 0
+			batch.addFSNotifyEvent(event)
+			if len(batch) > 0 {
+				if empty {
+					// Bound batch latency even when another path never becomes idle.
+					deadline.Reset(time.Second)
+				}
+				timer.Reset(100 * time.Millisecond)
+			}
+		case err, ok := <-watchErrors:
+			if !ok {
+				return
+			}
+			logging.LogErrorf("watch assets failed: %s", err)
+			if recoverWatch != nil && errors.Is(err, fsnotify.ErrEventOverflow) {
+				recoverBatch(true)
+			}
+		case <-recoveryTicks:
+			recoverBatch(false)
+		case <-timer.C:
+			flushBatch()
+		case <-deadline.C:
+			flushBatch()
+		}
+	}
 }
 
 func CloseWatchAssets() {
 	if nil != assetsWatcher {
 		assetsWatcher.Close()
+		assetsWatcher = nil
 	}
 }

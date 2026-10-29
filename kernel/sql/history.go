@@ -1,18 +1,6 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package sql
 
@@ -36,10 +24,16 @@ type History struct {
 	Path    string
 }
 
-func QueryHistory(stmt string) (ret []map[string]interface{}, err error) {
-	ret = []map[string]interface{}{}
+func QueryHistory(stmt string) (ret []map[string]any, err error) {
+	ret = []map[string]any{}
+	// 历史查询语句由调用方拼接，执行前必须校验为单条只读语句
+	// https://github.com/siyuan-note/siyuan/security/advisories/GHSA-4hjx-84f6-gr7c
+	if err = CheckHistoryReadonlyStatement(stmt); nil != err {
+		logging.LogWarnf("sql query [%s] rejected as non-readonly: %s", stmt, err)
+		return
+	}
 	rows, err := queryHistory(stmt)
-	if nil != err {
+	if err != nil {
 		logging.LogWarnf("sql query [%s] failed: %s", stmt, err)
 		return
 	}
@@ -51,19 +45,19 @@ func QueryHistory(stmt string) (ret []map[string]interface{}, err error) {
 	}
 
 	for rows.Next() {
-		columns := make([]interface{}, len(cols))
-		columnPointers := make([]interface{}, len(cols))
+		columns := make([]any, len(cols))
+		columnPointers := make([]any, len(cols))
 		for i := range columns {
 			columnPointers[i] = &columns[i]
 		}
 
-		if err = rows.Scan(columnPointers...); nil != err {
+		if err = rows.Scan(columnPointers...); err != nil {
 			return
 		}
 
-		m := make(map[string]interface{})
+		m := make(map[string]any)
 		for i, colName := range cols {
-			val := columnPointers[i].(*interface{})
+			val := columnPointers[i].(*any)
 			m[colName] = *val
 		}
 		ret = append(ret, m)
@@ -72,8 +66,17 @@ func QueryHistory(stmt string) (ret []map[string]interface{}, err error) {
 }
 
 func SelectHistoriesRawStmt(stmt string) (ret []*History) {
+	if nil == historyDB {
+		return
+	}
+	// 历史查询语句由调用方拼接，执行前必须校验为单条只读语句
+	// https://github.com/siyuan-note/siyuan/security/advisories/GHSA-4hjx-84f6-gr7c
+	if err := CheckHistoryReadonlyStatement(stmt); nil != err {
+		logging.LogWarnf("sql query [%s] rejected as non-readonly: %s", stmt, err)
+		return
+	}
 	rows, err := historyDB.Query(stmt)
-	if nil != err {
+	if err != nil {
 		logging.LogWarnf("sql query [%s] failed: %s", stmt, err)
 		return
 	}
@@ -88,7 +91,7 @@ func SelectHistoriesRawStmt(stmt string) (ret []*History) {
 
 func scanHistoryRows(rows *sql.Rows) (ret *History) {
 	var history History
-	if err := rows.Scan(&history.ID, &history.Type, &history.Op, &history.Title, &history.Content, &history.Path, &history.Created); nil != err {
+	if err := rows.Scan(&history.ID, &history.Type, &history.Op, &history.Title, &history.Content, &history.Path, &history.Created); err != nil {
 		logging.LogErrorf("query scan field failed: %s\n%s", err, logging.ShortStack())
 		return
 	}
@@ -96,17 +99,20 @@ func scanHistoryRows(rows *sql.Rows) (ret *History) {
 	return
 }
 
-func queryHistory(query string, args ...interface{}) (*sql.Rows, error) {
+func queryHistory(query string, args ...any) (*sql.Rows, error) {
 	query = strings.TrimSpace(query)
 	if "" == query {
 		return nil, errors.New("statement is empty")
 	}
+	if nil == historyDB {
+		return nil, errors.New("database is nil")
+	}
 	return historyDB.Query(query, args...)
 }
 
-func deleteOutdatedHistories(tx *sql.Tx, before string, context map[string]interface{}) (err error) {
-	stmt := "DELETE FROM histories_fts_case_insensitive WHERE created < ?"
-	if err = execStmtTx(tx, stmt, before); nil != err {
+func deleteOutdatedHistories(tx *sql.Tx, before int64) (err error) {
+	stmt := "DELETE FROM histories_fts_case_insensitive WHERE CAST(created AS INTEGER) < ?"
+	if err = execStmtTx(tx, stmt, before); err != nil {
 		return
 	}
 	return
@@ -117,7 +123,7 @@ const (
 	HistoriesPlaceholder              = "(?, ?, ?, ?, ?, ?, ?)"
 )
 
-func insertHistories(tx *sql.Tx, histories []*History, context map[string]interface{}) (err error) {
+func insertHistories(tx *sql.Tx, histories []*History, context map[string]any) (err error) {
 	if 1 > len(histories) {
 		return
 	}
@@ -129,22 +135,22 @@ func insertHistories(tx *sql.Tx, histories []*History, context map[string]interf
 			continue
 		}
 
-		if err = insertHistories0(tx, bulk, context); nil != err {
+		if err = insertHistories0(tx, bulk, context); err != nil {
 			return
 		}
 		bulk = []*History{}
 	}
 	if 0 < len(bulk) {
-		if err = insertHistories0(tx, bulk, context); nil != err {
+		if err = insertHistories0(tx, bulk, context); err != nil {
 			return
 		}
 	}
 	return
 }
 
-func insertHistories0(tx *sql.Tx, bulk []*History, context map[string]interface{}) (err error) {
+func insertHistories0(tx *sql.Tx, bulk []*History, context map[string]any) (err error) {
 	valueStrings := make([]string, 0, len(bulk))
-	valueArgs := make([]interface{}, 0, len(bulk)*strings.Count(HistoriesPlaceholder, "?"))
+	valueArgs := make([]any, 0, len(bulk)*strings.Count(HistoriesPlaceholder, "?"))
 	for _, b := range bulk {
 		valueStrings = append(valueStrings, HistoriesPlaceholder)
 		valueArgs = append(valueArgs, b.ID)
@@ -157,7 +163,7 @@ func insertHistories0(tx *sql.Tx, bulk []*History, context map[string]interface{
 	}
 
 	stmt := fmt.Sprintf(HistoriesFTSCaseInsensitiveInsert, strings.Join(valueStrings, ","))
-	if err = prepareExecInsertTx(tx, stmt, valueArgs); nil != err {
+	if err = prepareExecInsertTx(tx, stmt, valueArgs); err != nil {
 		return
 	}
 

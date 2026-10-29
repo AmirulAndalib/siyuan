@@ -1,84 +1,56 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package api
 
 import (
-	"net/http"
-
-	"github.com/88250/gulu"
 	"github.com/gin-gonic/gin"
+	"github.com/siyuan-note/siyuan/kernel/apicontract"
+	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func getTag(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	arg, ok := util.JsonArg(c, ret)
-	if !ok {
-		return
+func tagContracts(tags model.Tags) []*apicontract.TagData {
+	if tags == nil {
+		return nil
 	}
-
-	sortParam := arg["sort"]
-	sortMode := model.Conf.Tag.Sort
-	if nil != sortParam {
-		sortMode = int(sortParam.(float64))
+	ret := make([]*apicontract.TagData, len(tags))
+	for i, tag := range tags {
+		if tag != nil {
+			// 模型层的 Name/Label 为 HTML 转义形态，前端负责按上下文转义，这里还原为纯文本
+			ret[i] = &apicontract.TagData{Name: util.UnescapeHTML(tag.Name), Label: tag.Label, Children: tagContracts(tag.Children),
+				Type: tag.Type, Depth: tag.Depth, Count: tag.Count}
+		}
 	}
-
-	model.Conf.Tag.Sort = sortMode
-	model.Conf.Save()
-
-	ret.Data = model.BuildTags()
+	return ret
 }
 
-func renameTag(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	arg, ok := util.JsonArg(c, ret)
-	if !ok {
-		return
+var getTag = contractHandler(apicontract.GetTag, func(c *gin.Context, request apicontract.GetTagRequest) apicontract.Response[[]*apicontract.TagData] {
+	if model.IsAdminRoleContext(c) && !model.IsReadOnlyRoleContext(c) {
+		model.UpdateTagConf(func(s *conf.Tag) { s.Sort = int(request.Sort) })
 	}
-
-	oldLabel := arg["oldLabel"].(string)
-	newLabel := arg["newLabel"].(string)
-	if err := model.RenameTag(oldLabel, newLabel); nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
-		ret.Data = map[string]interface{}{"closeTimeout": 5000}
-		return
+	tags := model.BuildTags(request.IgnoreMaxListHint, request.App, int(request.Sort))
+	if model.IsReadOnlyRoleContext(c) {
+		tags = model.FilterTagsByPublishAccess(c, model.GetPublishAccess(), tags)
 	}
-}
-
-func removeTag(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	arg, ok := util.JsonArg(c, ret)
-	if !ok {
-		return
+	if tags == nil {
+		return apicontract.Success[[]*apicontract.TagData](nil)
 	}
+	return apicontract.Success(tagContracts(*tags))
+})
 
-	label := arg["label"].(string)
-	if err := model.RemoveTag(label); nil != err {
-		ret.Code = -1
-		ret.Msg = err.Error()
-		ret.Data = map[string]interface{}{"closeTimeout": 5000}
-		return
+var renameTag = contractHandler(apicontract.RenameTag, func(c *gin.Context, request apicontract.RenameTagRequest) apicontract.Response[apicontract.Null] {
+	if err := model.RenameTag(request.OldLabel, request.NewLabel); err != nil {
+		return apicontract.FailureWithTimeout[apicontract.Null](-1, err.Error(), 5000)
 	}
-}
+	return apicontract.Success(apicontract.Null{})
+})
+
+var removeTag = contractHandler(apicontract.RemoveTag, func(c *gin.Context, request apicontract.RemoveTagRequest) apicontract.Response[apicontract.Null] {
+	if err := model.RemoveTag(request.Label); err != nil {
+		return apicontract.FailureWithTimeout[apicontract.Null](-1, err.Error(), 5000)
+	}
+	return apicontract.Success(apicontract.Null{})
+})

@@ -1,11 +1,12 @@
 {
 	"ID": "20230506205948-yah52eb",
-	"Spec": "1",
+	"Spec": "2",
 	"Type": "NodeDocument",
 	"Properties": {
 		"id": "20230506205948-yah52eb",
 		"title": "Plugins",
-		"updated": "20230820184257"
+		"type": "doc",
+		"updated": "20261024160716"
 	},
 	"Children": [
 		{
@@ -14,7 +15,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230506210937-ubi5da4",
-				"updated": "20230506210937"
+				"updated": "20261024160716"
 			},
 			"Children": [
 				{
@@ -28,12 +29,12 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230506210937-bt48731",
-				"updated": "20230512195419"
+				"updated": "20261024160716"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "Plugins are mainly used to expand the overall functions of SiYuan."
+					"Data": "Plugins extend menus, panels, editor interactions, and other SiYuan features. They can also provide custom block rendering."
 				}
 			]
 		},
@@ -42,12 +43,12 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230512195420-9550ilh",
-				"updated": "20230512195433"
+				"updated": "20261024160716"
 			},
 			"Children": [
 				{
 					"Type": "NodeText",
-					"Data": "Compared with "
+					"Data": "Use "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -58,7 +59,7 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": ", the plugin is mainly for program function extension, not for content block extension."
+					"Data": " for self-contained tools embedded in a document. Choose a suitable plugin for features that integrate with SiYuan’s interface and workflows."
 				}
 			]
 		},
@@ -68,7 +69,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230506210937-yel1yei",
-				"updated": "20230506210937"
+				"updated": "20261016191345"
 			},
 			"Children": [
 				{
@@ -82,7 +83,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230506210937-v1ki1ir",
-				"updated": "20230506211116"
+				"updated": "20261016191345"
 			},
 			"Children": [
 				{
@@ -92,7 +93,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "code",
-					"TextMarkTextContent": "workspace/plugins/"
+					"TextMarkTextContent": "workspace/data/plugins/"
 				},
 				{
 					"Type": "NodeText",
@@ -101,11 +102,28 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "kbd",
+					"TextMarkTextContent": "Settings"
+				},
+				{
+					"Type": "NodeText",
+					"Data": "​"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " - "
+				},
+				{
+					"Type": "NodeTextMark",
+					"TextMarkType": "kbd",
 					"TextMarkTextContent": "Marketplace"
 				},
 				{
 					"Type": "NodeText",
-					"Data": "​ - "
+					"Data": "​"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " - "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -114,7 +132,11 @@
 				},
 				{
 					"Type": "NodeText",
-					"Data": "​ - "
+					"Data": "​"
+				},
+				{
+					"Type": "NodeText",
+					"Data": " - "
 				},
 				{
 					"Type": "NodeTextMark",
@@ -133,7 +155,7 @@
 			"HeadingLevel": 2,
 			"Properties": {
 				"id": "20230506210937-jxzxwz7",
-				"updated": "20230506211146"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -147,7 +169,7 @@
 			"Type": "NodeParagraph",
 			"Properties": {
 				"id": "20230506210937-i9vqw4g",
-				"updated": "20230820184257"
+				"updated": "20260809232000"
 			},
 			"Children": [
 				{
@@ -157,7 +179,7 @@
 				{
 					"Type": "NodeTextMark",
 					"TextMarkType": "a",
-					"TextMarkAHref": "https://b3log.org/siyuan/en/community.html",
+					"TextMarkAHref": "https://github.com/siyuan-note/bazaar",
 					"TextMarkTextContent": "Community marketplace repo"
 				},
 				{

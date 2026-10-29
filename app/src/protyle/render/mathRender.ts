@@ -4,63 +4,85 @@ import {Constants} from "../../constants";
 import {hasNextSibling, hasPreviousSibling} from "../wysiwyg/getBlock";
 import {hasClosestBlock} from "../util/hasClosest";
 import {looseJsonParse} from "../../util/functions";
+import {genRenderFrame} from "./util";
+import {getHostCapabilities} from "../../util/hostCapabilities";
+import {getMathRenderSecurity} from "./mathRenderSecurity";
+import {isFoldedRenderContent} from "./foldedContent";
+
+const fitMathWidth = (mathElement: HTMLElement, blockElement: HTMLElement | false, isBlock: boolean) => {
+    return new Promise<void>((resolve) => {
+        setTimeout(() => {
+            if (isBlock) {
+                const katexElement = mathElement.querySelector(".katex-display") as HTMLElement;
+                if (katexElement && katexElement.clientWidth < katexElement.scrollWidth) {
+                    katexElement.firstElementChild?.setAttribute("style", `font-size:${katexElement.clientWidth * 100 / katexElement.scrollWidth}%`);
+                }
+            } else if (blockElement && mathElement.offsetWidth > blockElement.clientWidth) {
+                mathElement.firstElementChild?.setAttribute("style", `font-size:${blockElement.clientWidth * 100 / mathElement.offsetWidth}%`);
+            }
+            resolve();
+        });
+    });
+};
 
 export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWidth = false) => {
-    let mathElements: Element[] = [];
-    if (element.getAttribute("data-subtype") === "math") {
-        // 编辑器内代码块编辑渲染
-        mathElements = [element];
-    } else {
-        mathElements = Array.from(element.querySelectorAll('[data-subtype="math"]'));
-    }
+    const mathElements = (element.getAttribute("data-subtype") === "math" ?
+        [element] : Array.from(element.querySelectorAll('[data-subtype="math"]')))
+        .filter(item => !isFoldedRenderContent(item));
     if (mathElements.length === 0) {
         return;
     }
-    addStyle(`${cdn}/js/katex/katex.min.css?v=0.16.0`, "protyleKatexStyle");
-    addScript(`${cdn}/js/katex/katex.min.js?v=0.16.0`, "protyleKatexScript").then(() => {
-        addScript(`${cdn}/js/katex/mhchem.min.js?v=0.16.0`, "protyleKatexMhchemScript").then(() => {
-            mathElements.forEach((mathElement: HTMLElement) => {
-                if (mathElement.getAttribute("data-render") === "true") {
-                    return;
-                }
+    addStyle(`${cdn}/js/katex/katex.min.css?v=0.19.0`, "protyleKatexStyle");
+    const unrenderedMathElements = mathElements.filter(mathElement =>
+        mathElement.getAttribute("data-render") !== "true");
+    if (unrenderedMathElements.length === 0) {
+        return;
+    }
+    return addScript(`${cdn}/js/katex/katex.min.js?v=0.19.0`, "protyleKatexScript").then(() => {
+        return addScript(`${cdn}/js/katex/mhchem.min.js?v=0.19.0`, "protyleKatexMhchemScript").then(() => {
+            const resizePromises: Promise<void>[] = [];
+            unrenderedMathElements.forEach((mathElement: HTMLElement) => {
                 mathElement.setAttribute("data-render", "true");
-                let renderElement = mathElement;
-                if (mathElement.tagName === "DIV") {
-                    renderElement = mathElement.firstElementChild as HTMLElement;
-                }
                 let macros = {};
                 try {
                     macros = looseJsonParse(window.siyuan.config.editor.katexMacros || "{}");
                 } catch (e) {
                     console.warn("KaTex macros is not JSON", e);
                 }
+                const isBlock = mathElement.tagName === "DIV";
+                const remoteKernel = getHostCapabilities().remoteKernel;
+                const security = getMathRenderSecurity(remoteKernel,
+                    Boolean(mathElement.closest('[data-protyle-lite-render="safe"]')));
                 try {
-                    renderElement.innerHTML = window.katex.renderToString(Lute.UnEscapeHTMLStr(mathElement.getAttribute("data-content")), {
-                        displayMode: mathElement.tagName === "DIV",
+                    let mathHTML = window.katex.renderToString(Lute.UnEscapeHTMLStr(mathElement.getAttribute("data-content")), {
+                        displayMode: isBlock,
                         output: "html",
                         macros,
-                        trust: true, // REF: https://katex.org/docs/supported#html
+                        trust: security.trust, // REF: https://katex.org/docs/supported#html
                         strict: (errorCode) => errorCode === "unicodeTextInMathMode" ? "ignore" : "warn",
                     });
-                    renderElement.classList.remove("ft__error");
+                    if (security.sanitize) {
+                        mathHTML = window.DOMPurify.sanitize(mathHTML);
+                    }
                     const blockElement = hasClosestBlock(mathElement);
-                    if (mathElement.tagName === "DIV") {
-                        renderElement.firstElementChild.setAttribute("contenteditable", "false");
-                        if (renderElement.childElementCount < 2) {
-                            // 不能使用 contenteditable="false"，否则光标无法移动到该块
-                            renderElement.insertAdjacentHTML("beforeend", `<span style="position: absolute;right: 0;top: 0;">${Constants.ZWSP}</span>`);
-                        }
+                    if (isBlock) {
+                        genRenderFrame(mathElement);
+                        mathElement.firstElementChild.firstElementChild.classList.remove("ft__error");
+                        mathElement.firstElementChild.firstElementChild.setAttribute("contenteditable", "false");
+                        mathElement.firstElementChild.firstElementChild.innerHTML = mathHTML;
                         // https://github.com/siyuan-note/siyuan/issues/3541
-                        const baseElements = renderElement.querySelectorAll(".base");
+                        const baseElements = mathElement.querySelectorAll(".katex-html > .katex-base");
                         if (baseElements.length > 0) {
                             baseElements[baseElements.length - 1].insertAdjacentHTML("afterend", "<span class='fn__flex-1'></span>");
                         }
                         // https://github.com/siyuan-note/siyuan/issues/4334
-                        const newlineElement = renderElement.querySelector(".katex-html > .newline");
+                        const newlineElement = mathElement.querySelector(".katex-html > .katex-newline");
                         if (newlineElement) {
                             newlineElement.parentElement.style.display = "block";
                         }
                     } else {
+                        mathElement.classList.remove("ft__error");
+                        mathElement.innerHTML = mathHTML;
                         if (blockElement && mathElement.getBoundingClientRect().width > blockElement.clientWidth) {
                             mathElement.style.maxWidth = "100%";
                             mathElement.style.overflowX = "auto";
@@ -72,7 +94,7 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
                             mathElement.style.overflowY = "";
                             mathElement.style.display = "";
                         }
-                        const nextSibling = hasNextSibling(mathElement);
+                        const nextSibling = hasNextSibling(mathElement) as HTMLElement;
                         if (!nextSibling) {
                             // 表格编辑问题 https://ld246.com/article/1629191424824
                             if (mathElement.parentElement.tagName !== "TH" && mathElement.parentElement.tagName !== "TD") {
@@ -80,18 +102,23 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
                                 mathElement.insertAdjacentText("afterend", "\n");
                             } else {
                                 // https://ld246.com/article/1651595975481，https://ld246.com/article/1658903123429
-                                // 随着浏览器的升级，从 beforeend 修改为 afterend
+                                // ZWSP 插到 KaTeX 外层之后，不进入公式内部
                                 mathElement.insertAdjacentText("afterend", Constants.ZWSP);
                             }
-                        } else if (nextSibling && nextSibling.nodeType !== 3 && (nextSibling as HTMLElement).getAttribute("data-type")?.indexOf("inline-math") > -1) {
+                        } else if (nextSibling && nextSibling.nodeType !== 3 &&
+                            (
+                                nextSibling.getAttribute("data-type")?.indexOf("inline-math") > -1 ||
+                                nextSibling.classList.contains("img")
+                            )) {
                             // 相邻的数学公式删除或光标移动有问题
                             mathElement.after(document.createTextNode(Constants.ZWSP));
                         } else if (nextSibling &&
-                            !nextSibling.textContent.startsWith("\n") && // https://github.com/siyuan-note/insider/issues/1089
+                            !/^[\u200B\uFEFF]*\n/.test(nextSibling.textContent) && // https://github.com/siyuan-note/insider/issues/1089
                             // 输入 $a$ 后，光标移动到其他块，再点击 a 后，光标不显示 https://github.com/siyuan-note/insider/issues/1076#issuecomment-1253215515
                             nextSibling.textContent !== Constants.ZWSP) {
                             // 数学公式后一个字符删除多 br https://ld246.com/article/1647157880974
-                            // 数学公式后有 \n 不能再添加 &#xFEFF; https://ld246.com/article/1647329437541
+                            // 公式后的换行可能带有零宽边界字符，此时不添加内部占位符，避免划选被截断。
+                            // https://ld246.com/article/1647329437541
                             mathElement.insertAdjacentHTML("beforeend", "&#xFEFF;");
                         }
                         // 光标无法移动到段首 https://ld246.com/article/1623551823742
@@ -100,29 +127,29 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
                         } else if (!hasPreviousSibling(mathElement) && ["TH", "TD"].includes(mathElement.parentElement.tagName)) {
                             // 单元格中只有数学公式时，光标无法移动到数学公式前
                             mathElement.insertAdjacentText("afterbegin", Constants.ZWSP);
+                        } else if (!hasPreviousSibling(mathElement)) {
+                            // 段首公式前保留可编辑文本，使全选后的组合输入从文本边界开始。
+                            mathElement.insertAdjacentText("beforebegin", Constants.ZWSP);
                         }
                     }
 
-                    // export pdf
+                    // 导出 PDF 时等待公式完成宽度适配后再继续
                     if (maxWidth) {
-                        setTimeout(() => {
-                            if (mathElement.tagName === "DIV") {
-                                const katexElement = mathElement.querySelector(".katex-display");
-                                if (katexElement.clientWidth < katexElement.scrollWidth) {
-                                    katexElement.firstElementChild.setAttribute("style", `font-size:${katexElement.clientWidth * 100 / katexElement.scrollWidth}%`);
-                                }
-                            } else {
-                                if (blockElement && mathElement.offsetWidth > blockElement.clientWidth) {
-                                    mathElement.firstElementChild.setAttribute("style", `font-size:${blockElement.clientWidth * 100 / mathElement.offsetWidth}%`);
-                                }
-                            }
-                        });
+                        resizePromises.push(fitMathWidth(mathElement, blockElement, isBlock));
                     }
                 } catch (e) {
-                    renderElement.innerHTML = e.message;
-                    renderElement.classList.add("ft__error");
+                    if (isBlock) {
+                        genRenderFrame(mathElement);
+                        mathElement.firstElementChild.firstElementChild.setAttribute("contenteditable", "false");
+                        mathElement.firstElementChild.firstElementChild.textContent = e.message;
+                        mathElement.firstElementChild.firstElementChild.classList.add("ft__error");
+                    } else {
+                        mathElement.textContent = e.message;
+                        mathElement.classList.add("ft__error");
+                    }
                 }
             });
+            return Promise.all(resizePromises).then((): undefined => undefined);
         });
     });
 };

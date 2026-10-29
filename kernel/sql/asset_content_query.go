@@ -1,18 +1,6 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package sql
 
@@ -27,13 +15,24 @@ import (
 	"github.com/siyuan-note/logging"
 )
 
-func QueryAssetContentNoLimit(stmt string) (ret []map[string]interface{}, err error) {
-	return queryAssetContentRawStmt(stmt, math.MaxInt)
+func QueryAssetContentNoLimit(stmt string) (ret []map[string]any, err error) {
+	if err = CheckSingleStatement(stmt); err != nil {
+		return
+	}
+	if err = CheckAssetContentReadonlyStatement(stmt); err != nil {
+		return
+	}
+	return queryAssetContentRawStmt(stmt, nil, math.MaxInt)
 }
 
-func queryAssetContentRawStmt(stmt string, limit int) (ret []map[string]interface{}, err error) {
-	rows, err := queryAssetContent(stmt)
-	if nil != err {
+// QueryAssetContentNoLimitArgs 使用绑定参数查询资源文件内容数据库。
+func QueryAssetContentNoLimitArgs(stmt string, args ...any) (ret []map[string]any, err error) {
+	return queryAssetContentRawStmt(stmt, args, math.MaxInt)
+}
+
+func queryAssetContentRawStmt(stmt string, args []any, limit int) (ret []map[string]any, err error) {
+	rows, err := queryAssetContent(stmt, args...)
+	if err != nil {
 		if strings.Contains(err.Error(), "syntax error") {
 			return
 		}
@@ -42,32 +41,32 @@ func queryAssetContentRawStmt(stmt string, limit int) (ret []map[string]interfac
 	defer rows.Close()
 
 	cols, err := rows.Columns()
-	if nil != err || nil == cols {
+	if err != nil || nil == cols {
 		return
 	}
 
 	noLimit := !containsLimitClause(stmt)
-	var count, errCount int
+	var count int
 	for rows.Next() {
-		columns := make([]interface{}, len(cols))
-		columnPointers := make([]interface{}, len(cols))
+		columns := make([]any, len(cols))
+		columnPointers := make([]any, len(cols))
 		for i := range columns {
 			columnPointers[i] = &columns[i]
 		}
 
-		if err = rows.Scan(columnPointers...); nil != err {
+		if err = rows.Scan(columnPointers...); err != nil {
 			return
 		}
 
-		m := make(map[string]interface{})
+		m := make(map[string]any)
 		for i, colName := range cols {
-			val := columnPointers[i].(*interface{})
+			val := columnPointers[i].(*any)
 			m[colName] = *val
 		}
 
 		ret = append(ret, m)
 		count++
-		if (noLimit && limit < count) || 0 < errCount {
+		if noLimit && count >= limit {
 			break
 		}
 	}
@@ -75,9 +74,12 @@ func queryAssetContentRawStmt(stmt string, limit int) (ret []map[string]interfac
 }
 
 func SelectAssetContentsRawStmt(stmt string, page, limit int) (ret []*AssetContent) {
+	if CheckSingleStatement(stmt) != nil || CheckAssetContentReadonlyStatement(stmt) != nil {
+		return
+	}
 	parsedStmt, err := sqlparser.Parse(stmt)
-	if nil != err {
-		return selectAssetContentsRawStmt(stmt, limit)
+	if err != nil {
+		return selectAssetContentsRawStmt(stmt, nil, limit)
 	}
 
 	switch parsedStmt.(type) {
@@ -122,7 +124,7 @@ func SelectAssetContentsRawStmt(stmt string, page, limit int) (ret []*AssetConte
 	stmt = strings.ReplaceAll(stmt, "\\\\*", "\\*")
 	stmt = strings.ReplaceAll(stmt, "from dual", "")
 	rows, err := queryAssetContent(stmt)
-	if nil != err {
+	if err != nil {
 		if strings.Contains(err.Error(), "syntax error") {
 			return
 		}
@@ -139,12 +141,20 @@ func SelectAssetContentsRawStmt(stmt string, page, limit int) (ret []*AssetConte
 }
 
 func SelectAssetContentsRawStmtNoParse(stmt string, limit int) (ret []*AssetContent) {
-	return selectAssetContentsRawStmt(stmt, limit)
+	if CheckSingleStatement(stmt) != nil || CheckAssetContentReadonlyStatement(stmt) != nil {
+		return
+	}
+	return selectAssetContentsRawStmt(stmt, nil, limit)
 }
 
-func selectAssetContentsRawStmt(stmt string, limit int) (ret []*AssetContent) {
-	rows, err := queryAssetContent(stmt)
-	if nil != err {
+// SelectAssetContentsRawStmtNoParseArgs 使用绑定参数查询资源文件内容，并保留调用方构造的 SQL。
+func SelectAssetContentsRawStmtNoParseArgs(stmt string, args []any, limit int) (ret []*AssetContent) {
+	return selectAssetContentsRawStmt(stmt, args, limit)
+}
+
+func selectAssetContentsRawStmt(stmt string, args []any, limit int) (ret []*AssetContent) {
+	rows, err := queryAssetContent(stmt, args...)
+	if err != nil {
 		if strings.Contains(err.Error(), "syntax error") {
 			return
 		}
@@ -163,7 +173,7 @@ func selectAssetContentsRawStmt(stmt string, limit int) (ret []*AssetContent) {
 			errCount++
 		}
 
-		if (noLimit && limit < count) || 0 < errCount {
+		if (noLimit && count >= limit) || 0 < errCount {
 			break
 		}
 	}
@@ -172,7 +182,7 @@ func selectAssetContentsRawStmt(stmt string, limit int) (ret []*AssetContent) {
 
 func scanAssetContentRows(rows *sql.Rows) (ret *AssetContent) {
 	var ac AssetContent
-	if err := rows.Scan(&ac.ID, &ac.Name, &ac.Ext, &ac.Path, &ac.Size, &ac.Updated, &ac.Content); nil != err {
+	if err := rows.Scan(&ac.ID, &ac.Name, &ac.Ext, &ac.Path, &ac.Size, &ac.Updated, &ac.Content); err != nil {
 		logging.LogErrorf("query scan field failed: %s\n%s", err, logging.ShortStack())
 		return
 	}
@@ -180,10 +190,13 @@ func scanAssetContentRows(rows *sql.Rows) (ret *AssetContent) {
 	return
 }
 
-func queryAssetContent(query string, args ...interface{}) (*sql.Rows, error) {
+func queryAssetContent(query string, args ...any) (*sql.Rows, error) {
 	query = strings.TrimSpace(query)
 	if "" == query {
 		return nil, errors.New("statement is empty")
+	}
+	if nil == assetContentDB {
+		return nil, errors.New("database is nil")
 	}
 	return assetContentDB.Query(query, args...)
 }

@@ -1,27 +1,26 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package util
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/88250/gulu"
+	"github.com/siyuan-note/logging"
 )
+
+var newlinesRegex = regexp.MustCompile(`[\r\n]+`)
+
+func ReplaceNewline(text, replaceWith string) string {
+	return newlinesRegex.ReplaceAllString(text, replaceWith)
+}
 
 func ContainsCJK(text string) bool {
 	for _, r := range text {
@@ -56,6 +55,59 @@ var emojiRegex = regexp.MustCompile(`/([0-9#][\x{20E3}])|` +
 
 func RemoveEmojiInvisible(text string) (ret string) {
 	ret = emojiRegex.ReplaceAllString(text, "")
-	ret = gulu.Str.RemoveInvisible(ret)
+	ret = RemoveInvalid(ret)
 	return
+}
+
+func RemoveInvalid(text string) (ret string) {
+	ret = gulu.Str.RemoveInvisible(text)
+	ret = gulu.Str.RemovePUA(ret)
+	return
+}
+
+func RemoveInvalidRetainCtrl(text string) (ret string) {
+	ret = strings.ReplaceAll(text, "\u00A0", " ") // NBSP 转换为普通空格
+	ret = gulu.Str.RemoveZeroWidthNoBreakSpace(ret)
+	ret = gulu.Str.RemoveZeroWidthSpace(ret)
+	// 不要移除零宽连字符，因为 emoji 需要 https://github.com/siyuan-note/siyuan/issues/14272
+	ret = gulu.Str.RemovePUA(ret)
+	return
+}
+
+var (
+	nativeEmojiChars     = map[string]bool{}
+	nativeEmojiCharsLock sync.RWMutex
+)
+
+func IsNativeEmoji(value string) bool {
+	nativeEmojiCharsLock.RLock()
+	defer nativeEmojiCharsLock.RUnlock()
+	return nativeEmojiChars[value]
+}
+
+func InitEmojiChars() {
+	builtConfPath := filepath.Join(AppearancePath, "emojis", "conf.json")
+	data, err := os.ReadFile(builtConfPath)
+	if err != nil {
+		logging.LogErrorf("read emojis conf.json failed: %s", err)
+		return
+	}
+
+	var conf []map[string]any
+	if err = gulu.JSON.UnmarshalJSON(data, &conf); err != nil {
+		logging.LogErrorf("unmarshal emojis conf.json failed: %s", err)
+		return
+	}
+
+	chars := map[string]bool{}
+	for _, emoji := range conf {
+		items := emoji["items"].([]any)
+		for _, item := range items {
+			e := item.(map[string]any)
+			chars[e["unicode"].(string)] = true
+		}
+	}
+	nativeEmojiCharsLock.Lock()
+	nativeEmojiChars = chars
+	nativeEmojiCharsLock.Unlock()
 }

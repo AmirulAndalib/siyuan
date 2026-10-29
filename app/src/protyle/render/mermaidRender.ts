@@ -1,21 +1,74 @@
 import {addScript} from "../util/addScript";
+import {isFoldedRenderContent} from "./foldedContent";
 import {Constants} from "../../constants";
-import {hasClosestByAttribute} from "../util/hasClosest";
+import {hasClosestByAttribute, hasClosestByClassName} from "../util/hasClosest";
+import {genIconHTML} from "./util";
+import {applyMermaidLayout, getMermaidLayout, MERMAID_LAYOUT_ATTR} from "./mermaidLayout";
+import {MERMAID_SANITIZE_OPTIONS} from "./mermaidSanitize";
+import {isZenumlDiagram} from "./mermaidZenuml";
+import {getHostCapabilities} from "../../util/hostCapabilities";
+import {escapeHtml} from "../../util/escape";
+import {ensureBrowserCompatibility} from "../util/browserCompat";
+
+let mermaidTidyTreePromise: Promise<void>;
+let mermaidZenumlPromise: Promise<void>;
+
+const registerMermaidExternalDiagrams = (mermaidElements: Element[], cdn: string) => {
+    if (!mermaidElements.some((item) => isZenumlDiagram(item.getAttribute("data-content")))) {
+        return Promise.resolve();
+    }
+    if (!mermaidZenumlPromise) {
+        mermaidZenumlPromise = addScript(
+            `${cdn}/js/mermaid/mermaid-zenuml.min.js?v=0.2.3`,
+            "protyleMermaidZenumlScript"
+        ).then(async () => {
+            await window.mermaid.registerExternalDiagrams([window.zenuml]);
+        });
+    }
+    return mermaidZenumlPromise;
+};
+
+const registerMermaidLayouts = (mermaidElements: Element[], cdn: string) => {
+    if (!mermaidElements.some((item) => getMermaidLayout(item.getAttribute(MERMAID_LAYOUT_ATTR)) === "tidy-tree")) {
+        return Promise.resolve();
+    }
+    if (!mermaidTidyTreePromise) {
+        mermaidTidyTreePromise = addScript(
+            `${cdn}/js/mermaid/mermaid-layout-tidy-tree.min.js?v=0.2.2`,
+            "protyleMermaidTidyTreeScript"
+        ).then(() => {
+            window.mermaid.registerLayoutLoaders(window.mermaidTidyTree);
+        });
+    }
+    return mermaidTidyTreePromise;
+};
 
 export const mermaidRender = (element: Element, cdn = Constants.PROTYLE_CDN) => {
     let mermaidElements: Element[] = [];
-    if (element.getAttribute("data-subtype") === "mermaid") {
-        // 编辑器内代码块编辑渲染
+    if (element.getAttribute("data-subtype") === "mermaid" && element.getAttribute("data-render") !== "true") {
         mermaidElements = [element];
     } else {
-        mermaidElements = Array.from(element.querySelectorAll('[data-subtype="mermaid"]'));
+        mermaidElements = Array.from(element.querySelectorAll('[data-subtype="mermaid"]:not([data-render="true"])'));
     }
+    mermaidElements = mermaidElements.filter(item => !isFoldedRenderContent(item));
     if (mermaidElements.length === 0) {
         return;
     }
-    addScript(`${cdn}/js/mermaid/mermaid.min.js?v=10.3.0`, "protyleMermaidScript").then(() => {
+    ensureBrowserCompatibility(cdn).then(() =>
+        addScript(`${cdn}/js/mermaid/mermaid.min.js?v=12.2.0`, "protyleMermaidScript")).then(async () => {
+        await registerMermaidExternalDiagrams(mermaidElements, cdn);
+        await registerMermaidLayouts(mermaidElements, cdn);
+        window.mermaid.registerIconPacks([
+            {
+                name: "logos",
+                loader: () =>
+                    fetch(`${cdn}/js/mermaid/icons.json?v=1.2.13`).then((res) => res.json()),
+            },
+        ]);
         const config: any = {
-            securityLevel: "loose", // 升级后无 https://github.com/siyuan-note/siyuan/issues/3587，可使用该选项
+            theme: window.siyuan.config.appearance.mode === 1 ? "dark" : "default",
+            // 升级后无 https://github.com/siyuan-note/siyuan/issues/3587，可使用 loose
+            securityLevel: getHostCapabilities().remoteKernel ? "strict" : "loose",
             altFontFamily: "sans-serif",
             fontFamily: "sans-serif",
             startOnLoad: false,
@@ -35,42 +88,105 @@ export const mermaidRender = (element: Element, cdn = Constants.PROTYLE_CDN) => 
                 rightPadding: 20
             }
         };
-        if (window.siyuan.config.appearance.mode === 1) {
-            config.theme = "dark";
-        }
         window.mermaid.initialize(config);
-        if (mermaidElements[0].firstElementChild.clientWidth === 0) {
-            const hideElement = hasClosestByAttribute(mermaidElements[0], "fold", "1");
-            if (!hideElement) {
-                return;
+        const hideElements: Element[] = [];
+        const normalElements: Element[] = [];
+        mermaidElements.forEach(item => {
+            // 可见的自动宽度块在图形生成前可能没有内容宽度，按布局盒判断是否隐藏。
+            if (item.getClientRects().length === 0) {
+                hideElements.push(item);
+            } else {
+                normalElements.push(item);
             }
+        });
+        if (hideElements.length > 0) {
             const observer = new MutationObserver(() => {
-                initMermaid(mermaidElements);
+                initMermaid(hideElements);
                 observer.disconnect();
             });
-            observer.observe(hideElement, {attributeFilter: ["fold"]});
-        } else {
-            initMermaid(mermaidElements);
+            hideElements.forEach(item => {
+                const hideElement = hasClosestByAttribute(item, "fold", "1");
+                if (hideElement) {
+                    observer.observe(hideElement, {attributeFilter: ["fold"]});
+                } else {
+                    const cardElement = hasClosestByClassName(item, "card__block", true);
+                    if (cardElement) {
+                        observer.observe(cardElement, {attributeFilter: ["class"]});
+                    }
+                }
+            });
         }
+        initMermaid(normalElements);
     });
 };
 
+export const refreshMermaidTheme = (element: Element) => {
+    const elements = element.matches('[data-subtype="mermaid"]') ? [element] :
+        element.querySelectorAll('[data-subtype="mermaid"]');
+    elements.forEach(item => {
+        item.removeAttribute("data-render");
+    });
+    mermaidRender(element);
+};
+
 const initMermaid = (mermaidElements: Element[]) => {
-    mermaidElements.forEach((item, index) => {
+    if (!mermaidElements.length) {
+        return;
+    }
+    const wysiswgElement = hasClosestByClassName(mermaidElements[0], "protyle-wysiwyg", true);
+    mermaidElements.forEach(async (item: HTMLElement) => {
         if (item.getAttribute("data-render") === "true") {
             return;
         }
+        item.setAttribute("data-render", "true");
         if (!item.firstElementChild.classList.contains("protyle-icons")) {
-            item.insertAdjacentHTML("afterbegin", `<div class="protyle-icons">
-    <span aria-label="${window.siyuan.languages.edit}" class="b3-tooltips__sw b3-tooltips protyle-icon protyle-icon--first protyle-action__edit"><svg><use xlink:href="#iconEdit"></use></svg></span>
-    <span aria-label="${window.siyuan.languages.more}" class="b3-tooltips__sw b3-tooltips protyle-icon protyle-action__menu protyle-icon--last"><svg><use xlink:href="#iconMore"></use></svg></span>
-</div>`);
+            item.insertAdjacentHTML("afterbegin", genIconHTML(wysiswgElement));
         }
         const renderElement = item.firstElementChild.nextElementSibling as HTMLElement;
-        renderElement.innerHTML = `<span style="position: absolute;left:0;top:0;width: 1px;">${Constants.ZWSP}</span><div contenteditable="false">${Lute.UnEscapeHTMLStr(item.getAttribute("data-content"))}</div>`;
-        setTimeout(() => {
-            window.mermaid.init(undefined, renderElement.lastElementChild);
-        }, Constants.TIMEOUT_LOAD * index);
-        item.setAttribute("data-render", "true");
+        if (!item.getAttribute("data-content")) {
+            renderElement.innerHTML = `<span style="position: absolute;left:0;top:0;width: 1px;">${Constants.ZWSP}</span>`;
+            return;
+        }
+        const id = "mermaid" + Lute.NewNodeID();
+        const container = document.createElement("div");
+        // 在屏幕外测量图形，避免临时节点参与主界面布局。
+        container.style.cssText = `position: fixed;left: -100000px;top: 0;width: ${document.body.clientWidth}px;pointer-events: none;`;
+        let diagramElement: Element;
+        try {
+            document.body.appendChild(container);
+            renderElement.innerHTML = `<span style="position: absolute;left:0;top:0;width: 1px;">${Constants.ZWSP}</span><div contenteditable="false"></div>`;
+            diagramElement = renderElement.lastElementChild;
+            const content = applyMermaidLayout(
+                Lute.UnEscapeHTMLStr(item.getAttribute("data-content")),
+                getMermaidLayout(item.getAttribute(MERMAID_LAYOUT_ATTR))
+            );
+            const mermaidData = await window.mermaid.render(id, content, container);
+            if (renderElement.lastElementChild !== diagramElement) {
+                return;
+            }
+            let svg = mermaidData.svg.replace(/(href|src|xlink:href)\s*=\s*["']\\\\/gi, (match, p1) => `${p1}="about:blank"`);
+            svg = window.DOMPurify.sanitize(svg, MERMAID_SANITIZE_OPTIONS);
+            diagramElement.innerHTML = svg;
+            if (wysiswgElement && !item.closest(".protyle-wysiwyg__embed, .mindmap-view__preview-block") &&
+                !item.querySelector(":scope > .protyle-action__drag")) {
+                const handle = item.ownerDocument.createElement("span");
+                handle.className = "protyle-action__drag protyle-block-resize";
+                handle.contentEditable = "false";
+                handle.dataset.resizeAxis = "width";
+                handle.setAttribute("data-prevent-swipe", "true");
+                renderElement.insertAdjacentElement("afterend", handle);
+            }
+        } catch (e) {
+            if (renderElement.lastElementChild !== diagramElement) {
+                return;
+            }
+            const errorElement = container.querySelector("#" + id);
+            const errorDiagram = errorElement ?
+                window.DOMPurify.sanitize(errorElement.outerHTML, MERMAID_SANITIZE_OPTIONS) : "";
+            const errorMessage = escapeHtml(e instanceof Error ? e.message : String(e)).replace(/\n/g, "<br>");
+            renderElement.lastElementChild.innerHTML = `${errorDiagram}<div class="fn__hr"></div><div class="ft__error">${errorMessage}</div>`;
+        } finally {
+            container.remove();
+        }
     });
 };

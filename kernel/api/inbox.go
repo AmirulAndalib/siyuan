@@ -1,87 +1,44 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package api
 
 import (
-	"net/http"
-
-	"github.com/88250/gulu"
 	"github.com/gin-gonic/gin"
+	"github.com/siyuan-note/siyuan/kernel/apicontract"
 	"github.com/siyuan-note/siyuan/kernel/model"
-	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func removeShorthands(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	arg, ok := util.JsonArg(c, ret)
-	if !ok {
-		return
-	}
-
-	idsArg := arg["ids"].([]interface{})
+var removeShorthands = contractHandler(apicontract.RemoveShorthands, func(c *gin.Context, request apicontract.RemoveShorthandsRequest) apicontract.Response[apicontract.Null] {
 	var ids []string
-	for _, id := range idsArg {
-		ids = append(ids, id.(string))
+	ids = append(ids, request.IDs...)
+	if err := model.RemoveCloudShorthands(ids); err != nil {
+		return apicontract.Failure[apicontract.Null](1, err.Error())
 	}
+	return apicontract.Success(apicontract.Null{})
+})
 
-	err := model.RemoveCloudShorthands(ids)
-	if nil != err {
-		ret.Code = 1
-		ret.Msg = err.Error()
-		return
+var getShorthand = contractHandler(apicontract.GetShorthand, func(c *gin.Context, request apicontract.TrimmedIDRequest) apicontract.Response[*apicontract.Shorthand] {
+	data, err := model.GetCloudShorthand(request.ID)
+	if err != nil {
+		return apicontract.Failure[*apicontract.Shorthand](1, err.Error())
 	}
-}
-
-func getShorthand(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	arg, ok := util.JsonArg(c, ret)
-	if !ok {
-		return
+	result, err := decodeCloudInbox[apicontract.Shorthand](data)
+	if err != nil {
+		return apicontract.Failure[*apicontract.Shorthand](1, err.Error())
 	}
+	return apicontract.Success(result)
+})
 
-	id := arg["id"].(string)
-	data, err := model.GetCloudShorthand(id)
-	if nil != err {
-		ret.Code = 1
-		ret.Msg = err.Error()
-		return
+var getShorthands = contractHandler(apicontract.GetShorthands, func(c *gin.Context, request apicontract.ShorthandsRequest) apicontract.Response[*apicontract.ShorthandsData] {
+	data, err := model.GetCloudShorthands(int(request.Page))
+	if err != nil {
+		return apicontract.Failure[*apicontract.ShorthandsData](1, err.Error())
 	}
-	ret.Data = data
-}
-
-func getShorthands(c *gin.Context) {
-	ret := gulu.Ret.NewResult()
-	defer c.JSON(http.StatusOK, ret)
-
-	arg, ok := util.JsonArg(c, ret)
-	if !ok {
-		return
+	result, err := decodeCloudInbox[apicontract.ShorthandsData](data)
+	if err != nil {
+		return apicontract.Failure[*apicontract.ShorthandsData](1, err.Error())
 	}
-
-	page := int(arg["page"].(float64))
-	data, err := model.GetCloudShorthands(page)
-	if nil != err {
-		ret.Code = 1
-		ret.Msg = err.Error()
-		return
-	}
-	ret.Data = data
-}
+	return apicontract.Success(result)
+})

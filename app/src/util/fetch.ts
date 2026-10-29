@@ -1,17 +1,40 @@
+import {fetchWithAppId} from "./fetchWithAppId";
 import {Constants} from "../constants";
 /// #if !BROWSER
 import {ipcRenderer} from "electron";
 /// #endif
 import {processMessage} from "./processMessage";
-import {kernelError} from "../dialog/processSystem";
+import {kernelError} from "./kernelFault";
+import {withFetchTimeout} from "./fetchTimeout";
+import type {FetchGet, FetchPost, FetchSyncPost} from "../types/api";
+import {trackSettingRequest} from "../config/setting/pending";
+import {trackEditorSaveRequest} from "../protyle/util/editorSave";
+import {showMessage} from "../dialog/message";
 
-export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketData) => void, headers?: IObject) => {
+const reportTransactionFailure = (url: string, error: Error) => {
+    if (url !== "/api/transactions" || error?.name === "AbortError") {
+        return;
+    }
+    // 保留当前编辑内容并提示核对保存结果，避免重发已在内核执行的事务。
+    showMessage(window.siyuan.languages.transactionSaveUnconfirmed, 0, "error", "transaction-save-unconfirmed");
+    void kernelError();
+};
+
+export const fetchPost = ((
+    url: string,
+    data?: any,
+    cb?: (response: IWebSocketData) => void,
+    headers?: Record<string, string>,
+    failCallback?: (response: IWebSocketData) => void,
+    signal?: AbortSignal,
+    timeout = url === "/api/system/exit" || url === "/api/system/setWorkspaceDir" ||
+        (url === "/api/system/setUILayout" && data?.errorExit) ? 30000 : 0) => {
     const init: RequestInit = {
         method: "POST",
     };
     if (data) {
         if (["/api/search/searchRefBlock", "/api/graph/getGraph", "/api/graph/getLocalGraph"].includes(url)) {
-            window.siyuan.reqIds[url] = new Date().getTime();
+            window.siyuan.reqIds[url] = Date.now();
             if (data.type === "local" && url === "/api/graph/getLocalGraph") {
                 // 当打开文档A的关系图、关系图、文档A后刷新，由于防止请求重复处理，文档A关系图无法渲染。
             } else {
@@ -20,7 +43,7 @@ export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketDat
         }
         // 并发导出后端接受顺序不一致
         if (url === "/api/transactions") {
-            data.reqId = new Date().getTime();
+            data.reqId = Date.now();
         }
         if (data instanceof FormData) {
             init.body = data;
@@ -31,21 +54,48 @@ export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketDat
     if (headers) {
         init.headers = headers;
     }
-    fetch(url, init).then((response) => {
-        if (response.status === 404) {
-            return {
-                data: null,
-                msg: response.statusText,
-                code: response.status,
-            };
-        } else {
-            if (response.headers.get("content-type")?.indexOf("application/json") > -1) {
-                return response.json();
-            } else {
-                return response.text();
-            }
+    if (signal) {
+        init.signal = signal;
+    }
+    let isGetFile202 = false;
+    return trackEditorSaveRequest(url, data, trackSettingRequest(url, withFetchTimeout((requestSignal) => fetchWithAppId(url, {...init, signal: requestSignal}).then((response): Promise<IWebSocketData | string> | IWebSocketData => {
+        switch (response.status) {
+            case 403:
+            case 404:
+                return {
+                    data: null,
+                    msg: response.statusText,
+                    code: -response.status,
+                };
+            case 401:
+                // 返回鉴权失败的话直接刷新页面，避免用户在当前页面操作 https://github.com/siyuan-note/siyuan/issues/15163
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+                return {
+                    data: null,
+                    msg: response.statusText,
+                    code: -response.status,
+                };
+            default:
+                // /api/file/getFile 接口返回202时表示文件没有正常读取
+                if (response.status === 202 && url === "/api/file/getFile") {
+                    isGetFile202 = true;
+                }
+                if (response.headers.get("content-type")?.indexOf("application/json") > -1) {
+                    return response.json();
+                } else {
+                    return response.text();
+                }
         }
+    }), signal, timeout), url === "/api/storage/setLocalStorageVal" && data?.key === Constants.LOCAL_SLASH_USAGE)).catch(error => {
+        reportTransactionFailure(url, error);
+        throw error;
     }).then((response: IWebSocketData) => {
+        if (failCallback && url === "/api/file/getFile" && isGetFile202) {
+            failCallback(response);
+            return;
+        }
         if (typeof response === "string") {
             if (cb) {
                 cb(response);
@@ -65,36 +115,58 @@ export const fetchPost = (url: string, data?: any, cb?: (response: IWebSocketDat
             cb(response);
         }
     }).catch((e) => {
-        console.warn("fetch post error", e);
-        if (url === "/api/transactions" && (e.message === "Failed to fetch" || e.message === "Unexpected end of JSON input")) {
-            kernelError();
+        if (e?.name === "AbortError") {
             return;
         }
+        if (failCallback) {
+            failCallback({
+                data: null,
+                msg: e.message,
+                code: 400,
+            });
+            return;
+        }
+        console.warn("fetch post failed [" + e + "], url [" + url + "]");
         /// #if !BROWSER
-        if (url === "/api/system/exit" || url === "/api/system/setWorkspaceDir" || (
+        if (url === "/api/system/setWorkspaceDir" || (
             ["/api/system/setUILayout"].includes(url) && data.errorExit // 内核中断，点关闭处理
         )) {
             ipcRenderer.send(Constants.SIYUAN_QUIT, location.port);
         }
         /// #endif
     });
-};
+}) as FetchPost<IWebSocketData>;
 
-export const fetchSyncPost = async (url: string, data?: any) => {
+export const fetchSyncPost = (async (url: string, data?: any, headers?: Record<string, string>, process = true,
+                                    signal?: AbortSignal) => {
     const init: RequestInit = {
         method: "POST",
+        signal,
     };
-    if (data) {
-        init.body = JSON.stringify(data);
+    if (headers) {
+        init.headers = headers;
     }
-    const res = await fetch(url, init);
-    const res2 = await res.json() as IWebSocketData;
-    processMessage(res2);
-    return res2;
-};
+    if (data) {
+        if (data instanceof FormData) {
+            init.body = data;
+        } else {
+            init.body = JSON.stringify(data);
+        }
+    }
+    return trackSettingRequest(url, trackEditorSaveRequest(url, data,
+        fetchWithAppId(url, init).then(res => res.json() as Promise<IWebSocketData>)).catch(error => {
+        reportTransactionFailure(url, error);
+        throw error;
+    }).then(res2 => {
+        if (process) {
+            processMessage(res2);
+        }
+        return res2;
+    }), url === "/api/storage/setLocalStorageVal" && data?.key === Constants.LOCAL_SLASH_USAGE);
+}) as FetchSyncPost<IWebSocketData>;
 
-export const fetchGet = (url: string, cb: (response: IWebSocketData | IObject | string) => void) => {
-    fetch(url).then((response) => {
+export const fetchGet = ((url: string, cb: (response: IWebSocketData | IObject | string) => void) => {
+    fetchWithAppId(url, {cache: "no-store"}).then((response) => {
         if (response.headers.get("content-type")?.indexOf("application/json") > -1) {
             return response.json();
         } else {
@@ -103,4 +175,4 @@ export const fetchGet = (url: string, cb: (response: IWebSocketData | IObject | 
     }).then((response) => {
         cb(response);
     });
-};
+}) as FetchGet<IWebSocketData | IObject | string>;

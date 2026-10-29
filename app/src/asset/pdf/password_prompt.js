@@ -13,10 +13,12 @@
  * limitations under the License.
  */
 
-import { createPromiseCapability, PasswordResponses } from "./pdfjs";
+/** @typedef {import("./overlay_manager.js").OverlayManager} OverlayManager */
+
+import { PasswordResponses } from "./pdfjs";
 
 /**
- * @typedef {Object} PasswordPromptOptions
+ * @typedef {object} PasswordPromptOptions
  * @property {HTMLDialogElement} dialog - The overlay's DOM element.
  * @property {HTMLParagraphElement} label - Label containing instructions for
  *                                          entering the password.
@@ -37,18 +39,16 @@ class PasswordPrompt {
   /**
    * @param {PasswordPromptOptions} options
    * @param {OverlayManager} overlayManager - Manager for the viewer overlays.
-   * @param {IL10n} l10n - Localization service.
    * @param {boolean} [isViewerEmbedded] - If the viewer is embedded, in e.g.
    *   an <iframe> or an <object>. The default value is `false`.
    */
-  constructor(options, overlayManager, l10n, isViewerEmbedded = false) {
+  constructor(options, overlayManager, isViewerEmbedded = false) {
     this.dialog = options.dialog;
     this.label = options.label;
     this.input = options.input;
     this.submitButton = options.submitButton;
     this.cancelButton = options.cancelButton;
     this.overlayManager = overlayManager;
-    this.l10n = l10n;
     this._isViewerEmbedded = isViewerEmbedded;
 
     // Attach the event listeners.
@@ -57,6 +57,7 @@ class PasswordPrompt {
     this.input.addEventListener("keydown", e => {
       if (e.keyCode === /* Enter = */ 13) {
         this.#verify();
+        e.preventDefault();
       }
     });
 
@@ -66,15 +67,13 @@ class PasswordPrompt {
   }
 
   async open() {
-    if (this.#activeCapability) {
-      await this.#activeCapability.promise;
-    }
-    this.#activeCapability = createPromiseCapability();
+    await this.#activeCapability?.promise;
+    this.#activeCapability = Promise.withResolvers();
 
     try {
       await this.overlayManager.open(this.dialog);
     } catch (ex) {
-      this.#activeCapability = null;
+      this.#activeCapability.resolve();
       throw ex;
     }
 
@@ -86,12 +85,14 @@ class PasswordPrompt {
     }
     // NOTE
     this.label.textContent = window.siyuan.languages[`password_${passwordIncorrect ? 'invalid' : 'label'}`]
+    // this.label.setAttribute(
+    //   "data-l10n-id",
+    //   passwordIncorrect ? "pdfjs-password-invalid" : "pdfjs-password-label"
+    // );
   }
 
   async close() {
-    if (this.overlayManager.active === this.dialog) {
-      this.overlayManager.close(this.dialog);
-    }
+    this.overlayManager.closeIfActive(this.dialog);
   }
 
   #verify() {

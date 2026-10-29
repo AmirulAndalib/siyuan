@@ -1,18 +1,6 @@
-// SiYuan - Refactor your thinking
+// SiYuan - https://github.com/siyuan-note/siyuan
 // Copyright (c) 2020-present, b3log.org
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package sql
 
@@ -20,7 +8,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,8 +24,7 @@ import (
 var (
 	historyOperationQueue []*historyDBQueueOperation
 	historyDBQueueLock    = sync.Mutex{}
-
-	historyTxLock = sync.Mutex{}
+	historyTxLock         = sync.Mutex{}
 )
 
 type historyDBQueueOperation struct {
@@ -42,7 +32,7 @@ type historyDBQueueOperation struct {
 	action      string // index/deleteOutdated
 
 	histories []*History // index
-	before    string     // deleteOutdated
+	before    int64      // deleteOutdated
 }
 
 func FlushHistoryTxJob() {
@@ -51,7 +41,8 @@ func FlushHistoryTxJob() {
 
 func FlushHistoryQueue() {
 	ops := getHistoryOperations()
-	if 1 > len(ops) {
+	total := len(ops)
+	if 1 > total {
 		return
 	}
 
@@ -64,7 +55,7 @@ func FlushHistoryQueue() {
 		groupOpsTotal[op.action]++
 	}
 
-	context := map[string]interface{}{eventbus.CtxPushMsg: eventbus.CtxPushMsgToStatusBar}
+	context := map[string]any{eventbus.CtxPushMsg: eventbus.CtxPushMsgToStatusBar}
 	groupOpsCurrent := map[string]int{}
 	for i, op := range ops {
 		if util.IsExiting.Load() {
@@ -72,7 +63,7 @@ func FlushHistoryQueue() {
 		}
 
 		tx, err := beginHistoryTx()
-		if nil != err {
+		if err != nil {
 			return
 		}
 
@@ -80,14 +71,23 @@ func FlushHistoryQueue() {
 		context["current"] = groupOpsCurrent[op.action]
 		context["total"] = groupOpsTotal[op.action]
 
-		if err = execHistoryOp(op, tx, context); nil != err {
+		if err = execHistoryOp(op, tx, context); err != nil {
 			tx.Rollback()
 			logging.LogErrorf("queue operation failed: %s", err)
+
+			if 0 < len(op.histories) {
+				dir := op.histories[0].Path[:strings.Index(op.histories[0].Path, "/")]
+				dirPath := filepath.Join(util.HistoryDir, dir)
+				if removeErr := os.RemoveAll(dirPath); nil != removeErr {
+					logging.LogErrorf("remove corrupted history dir [%s] failed: %s", dirPath, removeErr)
+				}
+			}
+
 			eventbus.Publish(util.EvtSQLHistoryRebuild)
 			return
 		}
 
-		if err = commitHistoryTx(tx); nil != err {
+		if err = commitTx(tx); err != nil {
 			logging.LogErrorf("commit tx failed: %s", err)
 			return
 		}
@@ -97,31 +97,31 @@ func FlushHistoryQueue() {
 		}
 	}
 
-	if 128 < len(ops) {
+	if 128 < total {
 		debug.FreeOSMemory()
 	}
 
-	elapsed := time.Now().Sub(start).Milliseconds()
+	elapsed := time.Since(start).Milliseconds()
 	if 7000 < elapsed {
 		logging.LogInfof("database history op tx [%dms]", elapsed)
 	}
 }
 
-func execHistoryOp(op *historyDBQueueOperation, tx *sql.Tx, context map[string]interface{}) (err error) {
+func execHistoryOp(op *historyDBQueueOperation, tx *sql.Tx, context map[string]any) (err error) {
 	switch op.action {
 	case "index":
 		err = insertHistories(tx, op.histories, context)
 	case "deleteOutdated":
-		err = deleteOutdatedHistories(tx, op.before, context)
+		err = deleteOutdatedHistories(tx, op.before)
 	default:
 		msg := fmt.Sprintf("unknown history operation [%s]", op.action)
-		logging.LogErrorf(msg)
+		logging.LogErrorf("%s", msg)
 		err = errors.New(msg)
 	}
 	return
 }
 
-func DeleteOutdatedHistories(before string) {
+func DeleteOutdatedHistories(before int64) {
 	historyDBQueueLock.Lock()
 	defer historyDBQueueLock.Unlock()
 
@@ -130,6 +130,10 @@ func DeleteOutdatedHistories(before string) {
 }
 
 func IndexHistoriesQueue(histories []*History) {
+	if 1 > len(histories) {
+		return
+	}
+
 	historyDBQueueLock.Lock()
 	defer historyDBQueueLock.Unlock()
 
